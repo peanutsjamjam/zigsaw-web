@@ -17,7 +17,8 @@
 
 ## 遊ぶ
 
-- https://peanutsjamjam.jp/~sugawara/zigsaw/
+- 本番: https://zigsaw.peanutsjamjam.jp/
+- 開発: https://peanutsjamjam.jp/~sugawara/zigsaw/
 
 ## 開発
 

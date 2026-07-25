@@ -138,6 +138,39 @@ npm run lint
 - `api.cgi` は編集後 `git pull` だけで反映（ビルド不要）。構文確認は `/usr/bin/perl -c api.cgi`。
 - ブラウザ確認時はキャッシュに注意（Ctrl+F5 / Cmd+Shift+R）。
 
+## 本番（zigsaw.peanutsjamjam.jp）
+
+dev（`~/public_html/zigsaw` → `/~sugawara/zigsaw/`）とは別系統の本番サイト。**データ（DB `zigsaw`・
+画像の実ファイル）は dev と共有する**。
+
+- **場所**: `/var/jp.peanutsjamjam.zigsaw/html`（GitHub `zigsaw-web` の git clone）。`env.pl` は
+  `$main::ZIGSAW_ENV = 'production'`。
+- **Apache**: vhost は `/etc/httpd/conf.d/zigsaw.conf`（HTTP→HTTPS リダイレクト＋HTTPS）。証明書は
+  Let's Encrypt（`certbot certonly --webroot -w /var/jp.peanutsjamjam.zigsaw/html -d zigsaw.peanutsjamjam.jp`、
+  自動更新あり）。
+- **実行ユーザーと DB**: 本番の CGI は **`apache` ユーザー**で動く（suexec の docroot は `/var/www` のみで
+  この場所は対象外、`SuexecUserGroup` も無いため）。PostgreSQL へは **peer 認証で role=`apache`** として
+  接続する。よって `apache` ロールに `zigsaw` の各テーブル/シーケンスへの権限を付与してある
+  （`GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES` ＋ `USAGE,SELECT ON ALL SEQUENCES` ＋
+  同内容の `ALTER DEFAULT PRIVILEGES`。今後テーブルを追加したら同じ付与が必要）。
+  - dev 側の CGI は UserDir + suexec で **`sugawara`** として動き、role=`sugawara`（テーブル所有者）で接続する。
+- **画像の実ファイル**: 正本は dev の `~/public_html/zigsaw/images`。本番の `html/images` はそこへの
+  **シンボリックリンク**（vhost は `Options SymLinksIfOwnerMatch`。リンク・実体とも sugawara 所有で追従可）。
+  dev は sugawara、本番は apache が書き込むため、`images` ツリーに **POSIX ACL** を設定して両ユーザーに
+  rwx を許可し、新規ファイルにも継承させてある:
+  ```
+  setfacl -R    -m u:apache:rwx -m u:sugawara:rwx ~/public_html/zigsaw/images
+  setfacl -R -d -m u:apache:rwx -m u:sugawara:rwx ~/public_html/zigsaw/images
+  ```
+- **デプロイ**（フロント／`api.cgi` を更新したとき）:
+  ```
+  git -C /var/jp.peanutsjamjam.zigsaw/html pull --ff-only
+  # フロント(src/)を変えたときだけビルド:
+  export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
+  npm --prefix /var/jp.peanutsjamjam.zigsaw/html run build
+  ```
+  `api.cgi` は pull だけで反映（ビルド不要）。
+
 ## サーバー前提（セットアップ済み）
 
 - システム perl `/usr/bin/perl` に `perl-DBI` / `perl-DBD-Pg` / `perl-JSON-PP` / `perl-Digest-SHA` を導入済み。
