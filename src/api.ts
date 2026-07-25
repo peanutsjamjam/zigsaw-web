@@ -16,6 +16,7 @@ export type Account = {
 export type GalleryImage = {
   id: number
   display_name: string
+  original_name: string   // アップロード時の元の名前（当初は display_name と同じ）
   width: number
   height: number
   owner: string | null   // 投稿者名。管理者が置いた画像は null

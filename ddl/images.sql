@@ -11,7 +11,8 @@ CREATE TABLE images (
   owner_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
   basename     TEXT NOT NULL UNIQUE,    -- 拡張子抜きの UUID
   ext          TEXT NOT NULL,           -- 遊ぶ用画像の拡張子（jpg/png/webp など）
-  display_name TEXT NOT NULL,           -- 一覧に出す題名
+  display_name TEXT NOT NULL,           -- 一覧に出す題名（あとで変更できる）
+  original_name TEXT NOT NULL,          -- アップロード時の元の名前（当初は display_name と同じ）
   width        INTEGER NOT NULL,
   height       INTEGER NOT NULL,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
