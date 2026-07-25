@@ -78,6 +78,16 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const selectImage = (image: GalleryImage) => { setSelection({ kind: 'image', image }); setColumns(6); setRows(4) }
   const selectPuzzle = (puzzle: Puzzle) => setSelection({ kind: 'puzzle', puzzle })
 
+  // いま選んでいる画像で、すでに作成済みのパズルのピース数の組（"列x行"）。
+  // 画像を選んだ時点でブラウザ側に保持しておき、既存の組が選ばれているときは作成を止める。
+  const existingGridsForSelectedImage = useMemo(() => {
+    if (selection?.kind !== 'image') return new Set<string>()
+    const imageId = selection.image.id
+    return new Set(puzzles.filter((p) => p.image_id === imageId).map((p) => `${p.columns}x${p.rows}`))
+  }, [puzzles, selection])
+  // 選択中のピース数のパズルがすでに存在するか。
+  const pieceCountExists = existingGridsForSelectedImage.has(`${columns}x${rows}`)
+
   // 選択中パズルの途中経過と状態。
   const selectedProgress = selection?.kind === 'puzzle' ? progressByPuzzle.get(selection.puzzle.id) ?? null : null
   const selectedStatus: PuzzleStatus = selection?.kind === 'puzzle'
@@ -95,6 +105,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   // 作成後は一覧を更新し、その新しいパズルを選択状態にして「作成しました」と知らせる。
   const createSelectedImage = async () => {
     if (selection?.kind !== 'image') return
+    // 同じ画像・同じピース数のパズルが既にあれば作らない（サーバー側も UNIQUE で束ねるが二重の防御）。
+    if (pieceCountExists) return
     setCreating(true)
     setError(null)
     try {
@@ -194,7 +206,12 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 <span className="muted">{columns * rows}ピース</span>
               </div>
               <div className="row">
-                <button type="button" className="btn primary large" onClick={() => void createSelectedImage()} disabled={creating}>
+                <button
+                  type="button"
+                  className="btn primary large"
+                  onClick={() => void createSelectedImage()}
+                  disabled={creating || pieceCountExists}
+                >
                   {creating ? '作成中…' : 'このピース数でパズルを作成'}
                 </button>
                 {selection.image.mine && (
@@ -203,7 +220,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                   </button>
                 )}
               </div>
-              <div className="muted">作成すると「パズル一覧」に追加されます。</div>
+              {pieceCountExists && <div className="muted">このピース数のパズルはすでに作成されています。</div>}
             </div>
           )}
 
