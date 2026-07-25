@@ -111,12 +111,12 @@ images/full, images/thumb (画像の実ファイル。Apache が静的配信)
 
 ## 管理者による画像の追加
 
-画像をギャラリーに置くには、`images/incoming/` に画像ファイル（jpg/png/webp/gif）を置いて
-シードスクリプトを実行する（`owner_id=NULL`＝管理者設置として登録される）。
+画像をギャラリーに置くには、共有画像ディレクトリの `incoming/` に画像ファイル（jpg/png/webp/gif）を
+置いてシードスクリプトを実行する（`owner_id=NULL`＝管理者設置として登録される）。`images/incoming/` は
+`/var/jp.peanutsjamjam.zigsaw.images/incoming/` へのシンボリックリンク越しに同じ場所を指す。
 
 ```
-mkdir -p ~/public_html/zigsaw/images/incoming
-cp <画像...> ~/public_html/zigsaw/images/incoming/
+cp <画像...> /var/jp.peanutsjamjam.zigsaw.images/incoming/
 /usr/bin/perl ~/public_html/zigsaw/ddl/seed_images.pl
 ```
 
@@ -154,14 +154,17 @@ dev（`~/public_html/zigsaw` → `/~sugawara/zigsaw/`）とは別系統の本番
   （`GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES` ＋ `USAGE,SELECT ON ALL SEQUENCES` ＋
   同内容の `ALTER DEFAULT PRIVILEGES`。今後テーブルを追加したら同じ付与が必要）。
   - dev 側の CGI は UserDir + suexec で **`sugawara`** として動き、role=`sugawara`（テーブル所有者）で接続する。
-- **画像の実ファイル**: 正本は dev の `~/public_html/zigsaw/images`。本番の `html/images` はそこへの
-  **シンボリックリンク**（vhost は `Options SymLinksIfOwnerMatch`。リンク・実体とも sugawara 所有で追従可）。
-  dev は sugawara、本番は apache が書き込むため、`images` ツリーに **POSIX ACL** を設定して両ユーザーに
+- **画像の実ファイル**: 正本は **`/var/jp.peanutsjamjam.zigsaw.images`**（`full/` `thumb/` `incoming/`）。
+  dev の `~/public_html/zigsaw/images` と本番の `html/images` は、どちらもここへの**シンボリックリンク**。
+  リンク・実体とも sugawara 所有なので、dev/本番の vhost の `Options SymLinksIfOwnerMatch` で追従できる。
+  dev は sugawara、本番は apache が書き込むため、この正本ディレクトリに **POSIX ACL** を設定して両ユーザーに
   rwx を許可し、新規ファイルにも継承させてある:
   ```
-  setfacl -R    -m u:apache:rwx -m u:sugawara:rwx ~/public_html/zigsaw/images
-  setfacl -R -d -m u:apache:rwx -m u:sugawara:rwx ~/public_html/zigsaw/images
+  setfacl -R    -m u:apache:rwx -m u:sugawara:rwx /var/jp.peanutsjamjam.zigsaw.images
+  setfacl -R -d -m u:apache:rwx -m u:sugawara:rwx /var/jp.peanutsjamjam.zigsaw.images
   ```
+  CGI の `IMAGE_DIR` は `dirname(api.cgi)/images` で、このシンボリックリンク越しに正本へ解決される
+  （dev・本番でコードは同じ）。
 - **デプロイ**（フロント／`api.cgi` を更新したとき）:
   ```
   git -C /var/jp.peanutsjamjam.zigsaw/html pull --ff-only
