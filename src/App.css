@@ -381,13 +381,13 @@
 
 .hud-time { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
 
-.hud-popover-anchor { position: relative; }
-
+/* パレットは body 直下にポータルで出し、背景色ボタンの真下・中央に固定配置する
+   （HUD の overflow-x:auto に切り取られないように）。left はボタン中央の画面座標。 */
 .swatch-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
+  position: fixed;
   transform: translateX(-50%);
+  z-index: 50;
+  max-width: calc(100vw - 16px);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -397,7 +397,7 @@
   flex-direction: column;
   gap: 12px;
 }
-.swatch-grid { display: grid; gap: 4px; }
+.swatch-grid { display: grid; gap: 4px; justify-content: center; }
 .swatch {
   width: 28px;
   height: 20px;
