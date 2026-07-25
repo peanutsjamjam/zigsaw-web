@@ -22,6 +22,8 @@ let nextSessionId = 1
 export default function App() {
   const [settings, setSettings] = useState<AppSettings>(loadSettings)
   const [account, setAccount] = useState<Account | null>(null)
+  // 実行環境が development のときだけ、開発用フラスコボタンを出す（env.pl 由来）。
+  const [isDev, setIsDev] = useState(false)
   const [booted, setBooted] = useState(false)
   const [showAuth, setShowAuth] = useState(false)
   const [session, setSession] = useState<Session | null>(null)
@@ -38,6 +40,11 @@ export default function App() {
   // 起動時にセッションを確認（未ログインなら account=null のまま先へ進む）。
   useEffect(() => {
     api.me().then(setAccount).catch(() => setAccount(null)).finally(() => setBooted(true))
+  }, [])
+
+  // 実行環境を取得して、開発環境のときだけフラスコボタンを表示する。
+  useEffect(() => {
+    api.env().then((r) => setIsDev(r.env === 'development')).catch(() => { /* 取得失敗時は非表示のまま */ })
   }, [])
 
   // ブラウザは利用者の操作なしに音を鳴らせないので、最初のクリックで用意する。
@@ -134,6 +141,7 @@ export default function App() {
         // アカウントが替わったら作り直す（前のユーザーの途中経過を残さない）。
         key={account?.username ?? 'guest'}
         account={account}
+        isDev={isDev}
         onStart={(req) => void start(req)}
         onRequestLogin={() => setShowAuth(true)}
         onLoggedOut={() => setAccount(null)}

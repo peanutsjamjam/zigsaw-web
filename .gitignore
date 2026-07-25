@@ -15,6 +15,7 @@ dist-ssr
 env.pl
 
 # アップロード/管理者設置の画像の実ファイル（DB の images テーブルと対で増える）
+/images
 images/full/
 images/thumb/
 images/incoming/

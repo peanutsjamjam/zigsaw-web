@@ -3,13 +3,14 @@
 //   「パズル一覧」  … 作成済みの共有パズル。誰でもプレイできる（未ログインはこの欄のみ）。
 //   「プレイしたパズル」… ログイン中の自分が遊んだパズル（プレイ中／クリア済み）。再開・再挑戦する。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2, Upload, X } from 'lucide-react'
+import { FlaskConical, Plus, Trash2, Upload, X } from 'lucide-react'
 import { api, type Account, type GalleryImage, type ProgressItem, type Puzzle } from '../api'
 import { prepareUpload } from '../lib/generator'
 import type { SavedProgress } from '../api'
 import { PLACEHOLDER_WALK_FRAMES, SHAPE_IMAGES } from '../lib/shapes'
 import { statusFromState, STATUS_TEXT, type PuzzleStatus } from '../lib/status'
 import { AccountMenu } from './AccountMenu'
+import { DevPanel } from './DevPanel'
 
 export type StartRequest = {
   puzzle: Puzzle
@@ -19,6 +20,8 @@ export type StartRequest = {
 
 type Props = {
   account: Account | null
+  /** 実行環境が development か。true のときだけ開発用フラスコボタンを出す。 */
+  isDev: boolean
   onStart: (req: StartRequest) => void
   onRequestLogin: () => void
   onLoggedOut: () => void
@@ -30,7 +33,8 @@ type Selection =
   | { kind: 'image'; image: GalleryImage }
   | { kind: 'puzzle'; puzzle: Puzzle }
 
-export function SetupView({ account, onStart, onRequestLogin, onLoggedOut, busy }: Props) {
+export function SetupView({ account, isDev, onStart, onRequestLogin, onLoggedOut, busy }: Props) {
+  const [showDevPanel, setShowDevPanel] = useState(false)
   const [images, setImages] = useState<GalleryImage[]>([])
   const [puzzles, setPuzzles] = useState<Puzzle[]>([])
   const [progress, setProgress] = useState<ProgressItem[]>([])
@@ -133,8 +137,23 @@ export function SetupView({ account, onStart, onRequestLogin, onLoggedOut, busy 
           Zigsaw
           {selection && <img className="title-shape" src={SHAPE_IMAGES.PlaceholderShape004} alt="" />}
         </h1>
-        <AccountMenu account={account} onRequestLogin={onRequestLogin} onLoggedOut={onLoggedOut} />
+        <div className="setup-top-right">
+          {isDev && (
+            <button
+              type="button"
+              className={`icon-btn dev-btn${showDevPanel ? ' active' : ''}`}
+              title="開発メニュー（開発環境のみ）"
+              aria-label="開発メニュー"
+              onClick={() => setShowDevPanel(true)}
+            >
+              <FlaskConical size={18} />
+            </button>
+          )}
+          <AccountMenu account={account} onRequestLogin={onRequestLogin} onLoggedOut={onLoggedOut} />
+        </div>
       </div>
+
+      {showDevPanel && <DevPanel account={account} onClose={() => setShowDevPanel(false)} />}
 
       {/* 何かを選んでいるあいだは、プレビュー＋操作ボタンをまとめて枠で囲み、
           右上の × で選択を解除して最初の画面（どの項目も未選択）に戻れるようにする。
