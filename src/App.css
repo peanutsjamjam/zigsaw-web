@@ -95,8 +95,38 @@
 .dev-btn:hover { background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .dev-btn.active { background: var(--warn); color: #fff; }
 
-.dev-panel { position: relative; align-items: stretch; text-align: left; min-width: min(92vw, 420px); }
-.dev-panel h2 { text-align: center; }
+/* 開発用フラスコ画面（全画面切替） */
+.dev-view {
+  min-height: 100%;
+  padding: 24px 40px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.dev-view-head { display: flex; align-items: center; gap: 16px; }
+.dev-view-head h1 { margin: 0; font-size: 24px; }
+
+.table-wrap { overflow-x: auto; }
+.dev-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+.dev-table th, .dev-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.dev-table th { color: var(--muted); font-weight: 600; }
+.dev-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dev-table tbody tr:hover { background: var(--panel-2); }
+.dev-row { cursor: pointer; }
+.dev-row.selected { background: var(--accent-soft); }
+.dev-row.selected:hover { background: var(--accent-soft); }
+
+.dev-detail { display: flex; flex-direction: column; gap: 16px; margin-top: 8px; }
+.dev-subtitle { margin: 4px 0; font-size: 16px; }
 
 .setup-title {
   grid-column: 2;

@@ -39,6 +39,26 @@ export type Puzzle = {
   thumb_url: string
 }
 
+// 開発用の全ユーザー一覧（dev_users が返す。開発環境のみ）。認証情報は含まない。
+export type DevUser = {
+  id: number
+  username: string
+  email: string
+  is_admin: boolean
+  created_at: string
+  image_count: number
+  image_bytes: number   // その人の画像ファイル（full）の合計バイト数
+  puzzle_count: number
+  progress_count: number
+}
+
+// 開発用: 指定ユーザーが登録した画像・作成したパズル・保存ゲーム（dev_user_detail が返す）。
+export type DevUserDetail = {
+  images: GalleryImage[]
+  puzzles: Puzzle[]
+  progress: ProgressItem[]
+}
+
 // 途中経過として保存する状態。ゲーム本体の SavedGameState に、一覧の「現在の様子」に
 // 出すためのスナップショット画像（data URL）を足したもの。snapshot はゲーム進行には使わない。
 export type SavedProgress = SavedGameState & { snapshot?: string }
@@ -121,6 +141,8 @@ export const api = {
   env: () => request<{ env: string }>('?action=env'),
 
   me: () => request<Account>('?action=me'),
+  devUsers: () => request<{ users: DevUser[] }>('?action=dev_users').then((r) => r.users),
+  devUserDetail: (id: number) => request<DevUserDetail>(`?action=dev_user_detail&id=${id}`),
   login: (email: string, password: string) => postJson<Account>('?action=login', { email, password }),
   logout: () => postJson<{ ok: true }>('?action=logout', {}),
 

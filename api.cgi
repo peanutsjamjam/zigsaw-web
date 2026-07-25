@@ -39,6 +39,8 @@ use File::Basename qw(dirname);
 #   DELETE ?action=account                          -> アカウント削除（progress は CASCADE 削除、
 #                                                      アップロード画像は owner_id が NULL になり残る）
 #   GET    ?action=me                               -> {username,email,is_admin} or 401
+#   GET    ?action=dev_users                        -> 全ユーザー一覧（開発環境のみ。本番は404。salt/iterations は返さない）
+#   GET    ?action=dev_user_detail&id=<uid>         -> 指定ユーザーの画像/パズル/保存ゲーム（開発環境のみ）
 #   GET    ?action=images                           -> アップロード画像一覧（未ログインでも可）
 #   POST   ?action=image  {display_name,width,height,ext,full,thumb}
 #                                                   -> 画像アップロード（要ログイン。full/thumb は base64）
@@ -589,6 +591,87 @@ eval {
     elsif ($action eq 'me' && $method eq 'GET') {
         my $u = require_user($dbh);
         respond({ username => $u->{username}, email => $u->{email}, is_admin => pgbool($u->{is_admin}) });
+    }
+    elsif ($action eq 'dev_users' && $method eq 'GET') {
+        # 開発用: 全ユーザーの一覧。開発環境でのみ有効（本番では 404 扱い）。
+        # 認証情報（password_hash / salt / iterations）は返さない。
+        fail('not_found', '404 Not Found') unless $ZIGSAW_ENV eq 'development';
+        my $rows = $dbh->selectall_arrayref(
+            'SELECT u.id, u.username, u.email, u.is_admin, u.created_at,
+                    (SELECT count(*) FROM images   i  WHERE i.owner_id   = u.id) AS image_count,
+                    (SELECT count(*) FROM puzzles  p  WHERE p.creator_id = u.id) AS puzzle_count,
+                    (SELECT count(*) FROM progress pr WHERE pr.user_id   = u.id) AS progress_count
+               FROM users u ORDER BY u.id',
+            { Slice => {} }
+        );
+        # 画像ファイルの合計サイズはユーザーごとに集計する（DB には無いので実ファイルを stat）。
+        my $imgs = $dbh->selectall_arrayref(
+            'SELECT owner_id, basename, ext FROM images WHERE owner_id IS NOT NULL',
+            { Slice => {} }
+        );
+        my %bytes;
+        for my $im (@$imgs) {
+            my $path = "$IMAGE_DIR/full/$im->{basename}.$im->{ext}";
+            $bytes{$im->{owner_id}} += (-f $path) ? (stat($path))[7] : 0;
+        }
+        for my $r (@$rows) {
+            $r->{id}             = 0 + $r->{id};
+            $r->{is_admin}       = pgbool($r->{is_admin});
+            $r->{image_count}    = 0 + $r->{image_count};
+            $r->{puzzle_count}   = 0 + $r->{puzzle_count};
+            $r->{progress_count} = 0 + $r->{progress_count};
+            $r->{image_bytes}    = 0 + ($bytes{$r->{id}} || 0);
+        }
+        respond({ users => $rows });
+    }
+    elsif ($action eq 'dev_user_detail' && $method eq 'GET') {
+        # 開発用: 指定ユーザーが登録した画像・作成したパズル・保存したゲーム（progress）。
+        fail('not_found', '404 Not Found') unless $ZIGSAW_ENV eq 'development';
+        my $uid = int(query_param('id') || 0);
+        fail('bad_request') if $uid < 1;
+        my $base = app_base_url();
+
+        my $img_rows = $dbh->selectall_arrayref(
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.width, i.height,
+                    ou.username AS owner_username, false AS mine
+               FROM images i LEFT JOIN users ou ON ou.id = i.owner_id
+              WHERE i.owner_id = ? ORDER BY i.created_at DESC, i.id DESC',
+            { Slice => {} }, $uid
+        );
+        my $puz_rows = $dbh->selectall_arrayref(
+            'SELECT p.id, p.image_id, p.columns, p.rows, cu.username AS creator_username,
+                    i.basename, i.ext, i.display_name, i.width, i.height
+               FROM puzzles p JOIN images i ON i.id = p.image_id
+               LEFT JOIN users cu ON cu.id = p.creator_id
+              WHERE p.creator_id = ? ORDER BY p.created_at DESC, p.id DESC',
+            { Slice => {} }, $uid
+        );
+        my $prog_rows = $dbh->selectall_arrayref(
+            'SELECT pr.id, pr.puzzle_id, pr.state, pr.updated_at,
+                    p.image_id, p.columns, p.rows, cu.username AS creator_username,
+                    i.basename, i.ext, i.display_name, i.width, i.height
+               FROM progress pr
+               JOIN puzzles p ON p.id = pr.puzzle_id
+               JOIN images i ON i.id = p.image_id
+               LEFT JOIN users cu ON cu.id = p.creator_id
+              WHERE pr.user_id = ? ORDER BY pr.updated_at DESC',
+            { Slice => {} }, $uid
+        );
+        my @progress = map {
+            {
+                id         => 0 + $_->{id},
+                puzzle_id  => 0 + $_->{puzzle_id},
+                state      => (eval { $JSON->decode($_->{state}) } || {}),
+                updated_at => $_->{updated_at},
+                puzzle     => puzzle_row_to_json($base, $_),
+            }
+        } @$prog_rows;
+
+        respond({
+            images   => [ map { image_row_to_json($base, $_) } @$img_rows ],
+            puzzles  => [ map { puzzle_row_to_json($base, $_) } @$puz_rows ],
+            progress => \@progress,
+        });
     }
     elsif ($action eq 'images' && $method eq 'GET') {
         # ギャラリー一覧。未ログインでも見られる（遊べる）。ログイン中なら mine を立てる。

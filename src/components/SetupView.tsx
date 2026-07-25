@@ -10,7 +10,6 @@ import type { SavedProgress } from '../api'
 import { PLACEHOLDER_WALK_FRAMES, SHAPE_IMAGES } from '../lib/shapes'
 import { statusFromState, STATUS_TEXT, type PuzzleStatus } from '../lib/status'
 import { AccountMenu } from './AccountMenu'
-import { DevPanel } from './DevPanel'
 
 export type StartRequest = {
   puzzle: Puzzle
@@ -23,6 +22,8 @@ type Props = {
   /** 実行環境が development か。true のときだけ開発用フラスコボタンを出す。 */
   isDev: boolean
   onStart: (req: StartRequest) => void
+  /** フラスコボタン: 画面全体を開発用ビューへ切り替える。 */
+  onOpenDev: () => void
   onRequestLogin: () => void
   onLoggedOut: () => void
   busy: boolean
@@ -33,8 +34,7 @@ type Selection =
   | { kind: 'image'; image: GalleryImage }
   | { kind: 'puzzle'; puzzle: Puzzle }
 
-export function SetupView({ account, isDev, onStart, onRequestLogin, onLoggedOut, busy }: Props) {
-  const [showDevPanel, setShowDevPanel] = useState(false)
+export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, onLoggedOut, busy }: Props) {
   const [images, setImages] = useState<GalleryImage[]>([])
   const [puzzles, setPuzzles] = useState<Puzzle[]>([])
   const [progress, setProgress] = useState<ProgressItem[]>([])
@@ -141,10 +141,10 @@ export function SetupView({ account, isDev, onStart, onRequestLogin, onLoggedOut
           {isDev && (
             <button
               type="button"
-              className={`icon-btn dev-btn${showDevPanel ? ' active' : ''}`}
+              className="icon-btn dev-btn"
               title="開発メニュー（開発環境のみ）"
               aria-label="開発メニュー"
-              onClick={() => setShowDevPanel(true)}
+              onClick={onOpenDev}
             >
               <FlaskConical size={18} />
             </button>
@@ -152,8 +152,6 @@ export function SetupView({ account, isDev, onStart, onRequestLogin, onLoggedOut
           <AccountMenu account={account} onRequestLogin={onRequestLogin} onLoggedOut={onLoggedOut} />
         </div>
       </div>
-
-      {showDevPanel && <DevPanel account={account} onClose={() => setShowDevPanel(false)} />}
 
       {/* 何かを選んでいるあいだは、プレビュー＋操作ボタンをまとめて枠で囲み、
           右上の × で選択を解除して最初の画面（どの項目も未選択）に戻れるようにする。
