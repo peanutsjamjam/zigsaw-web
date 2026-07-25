@@ -46,6 +46,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [creating, setCreating] = useState(false)
   const [createdNotice, setCreatedNotice] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // アップロード確認中の画像（未登録）。null なら確認画面は出ていない。
+  const [pending, setPending] = useState<{ file: File; url: string } | null>(null)
+  const [pendingName, setPendingName] = useState('')
   const [confirmingRemoval, setConfirmingRemoval] = useState<GalleryImage | null>(null)
 
   const reload = useCallback(async () => {
@@ -122,11 +125,28 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     }
   }
 
-  const upload = async (file: File) => {
+  // 画像を選んだら、すぐには登録せず確認画面（pending）を出す。名前は編集できる。
+  const pickFile = (file: File) => {
+    if (pending) URL.revokeObjectURL(pending.url)
+    setPending({ file, url: URL.createObjectURL(file) })
+    setPendingName(file.name)
+    setError(null)
+  }
+  const cancelUpload = () => {
+    if (pending) URL.revokeObjectURL(pending.url)
+    setPending(null)
+  }
+  // 確認画面で「この画像を登録」を押したときに、編集後の名前を display_name として送る。
+  const confirmUpload = async () => {
+    if (!pending) return
     setUploading(true)
     setError(null)
     try {
-      const image = await api.uploadImage(await prepareUpload(file))
+      const payload = await prepareUpload(pending.file)
+      payload.display_name = pendingName.trim() || pending.file.name
+      const image = await api.uploadImage(payload)
+      URL.revokeObjectURL(pending.url)
+      setPending(null)
       await reload()
       selectImage(image)
     } catch (err) {
@@ -267,7 +287,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 {image.owner && <div className="muted card-owner">{image.owner}</div>}
               </button>
             ))}
-            <UploadCard uploading={uploading} onFile={(f) => void upload(f)} />
+            <UploadCard uploading={uploading} onFile={pickFile} />
           </div>
         </Section>
       )}
@@ -334,6 +354,32 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 削除
               </button>
               <button type="button" className="btn" onClick={() => setConfirmingRemoval(null)}>キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 画像アップロードの確認画面。プレビューを見て、名前（display_name）を編集して登録する。 */}
+      {pending && (
+        <div className="overlay dim" onClick={uploading ? undefined : cancelUpload}>
+          <div className="panel" onClick={(e) => e.stopPropagation()}>
+            <h2>この画像を登録しますか？</h2>
+            <img className="upload-preview" src={pending.url} alt="" />
+            <label className="field">名前（この画像の題名になります）
+              <input
+                type="text"
+                value={pendingName}
+                maxLength={200}
+                onChange={(e) => setPendingName(e.target.value)}
+                autoFocus
+              />
+            </label>
+            {error && <div className="error">{error}</div>}
+            <div className="row">
+              <button type="button" className="btn primary" onClick={() => void confirmUpload()} disabled={uploading}>
+                {uploading ? '登録中…' : 'この画像を登録'}
+              </button>
+              <button type="button" className="btn" onClick={cancelUpload} disabled={uploading}>キャンセル</button>
             </div>
           </div>
         </div>

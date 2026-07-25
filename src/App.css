@@ -288,6 +288,15 @@
 
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; text-align: left; width: 100%; }
 
+/* 画像アップロード確認画面のプレビュー */
+.upload-preview {
+  max-width: min(480px, 80vw);
+  max-height: 46vh;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
 /* ============ ログイン / 新規登録 ============ */
 
 .auth-wrap { min-height: 100%; display: grid; place-items: center; padding: 24px; }
