@@ -1,0 +1,19 @@
+# 本番ビルド (dist/) を /~sugawara/zigsaw/ で透過的に配信する
+RewriteEngine On
+
+# .cgi を CGI スクリプトとして実行
+AddHandler cgi-script .cgi
+
+# すでに dist/ 配下へのリクエストはそのまま（無限ループ防止）
+RewriteRule ^dist/ - [L]
+
+# ルート ("/~sugawara/zigsaw/") は dist/index.html を返す
+RewriteRule ^$ dist/index.html [L]
+
+# 実在するファイル/ディレクトリ（api.cgi, images/ など）はそのまま配信/実行
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# それ以外のパスはすべて dist/ 配下へ転送
+RewriteRule ^(.+)$ dist/$1 [L]

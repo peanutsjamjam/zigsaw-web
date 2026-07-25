@@ -1,0 +1,61 @@
+:root {
+  --bg: #f7f5ef;
+  --panel: #ffffff;
+  --panel-2: #f1eee6;
+  --text: #2a2723;
+  --muted: #8a857c;
+  --border: #e2ddd2;
+  --accent: #9a6b3f;
+  --accent-soft: #f0e3d4;
+  --danger: #c0473b;
+  --ok: #3a9d5d;
+  --warn: #cf8b2f;
+  --input-bg: #ffffff;          /* 入力欄・操作コントロールの背景 */
+
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif;
+  color: var(--text);
+}
+
+/* ダーク配色。OS の設定に従う（本アプリは配色の切り替え設定を持たない） */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15191f;
+    --panel: #1e242c;
+    --panel-2: #1a1f26;
+    --text: #e3e8ef;
+    --muted: #8b95a4;
+    --border: #2d343e;
+    --accent: #57a6dd;
+    --accent-soft: #2b323c;
+    --danger: #e0727a;
+    --ok: #5cc27e;
+    --warn: #e0a95c;
+    --input-bg: #2b323c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  /* 盤面をドラッグしたときに、ページごと引っぱられる（プルダウン更新など）のを止める */
+  overscroll-behavior: none;
+}
+
+button { font-family: inherit; cursor: pointer; }
+
+input {
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+.muted { color: var(--muted); }
