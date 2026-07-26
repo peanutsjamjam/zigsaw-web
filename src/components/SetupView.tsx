@@ -193,15 +193,19 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     if (pending) URL.revokeObjectURL(pending.url)
     setPending(null)
   }
-  // 確認画面で「この画像を登録」を押したときに、編集後の名前を display_name として送る。
+  // 確認画面で「この画像を登録」を押したとき。ファイル名は original_name（変更不可）、
+  // 編集した「タイトル」は display_name として送る。
   const confirmUpload = async () => {
     if (!pending) return
     setUploading(true)
     setError(null)
     try {
-      const payload = await prepareUpload(pending.file)
-      payload.display_name = pendingName.trim() || pending.file.name
-      const image = await api.uploadImage(payload)
+      const prepared = await prepareUpload(pending.file)
+      const image = await api.uploadImage({
+        ...prepared,
+        original_name: pending.file.name,
+        display_name: pendingName.trim() || pending.file.name,
+      })
       URL.revokeObjectURL(pending.url)
       setPending(null)
       await reload()
@@ -279,6 +283,14 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 <div className="edit-item">
                   <span className="edit-label">画像のサイズ</span>
                   <span>{selection.image.width} x {selection.image.height}</span>
+                </div>
+                <div className="edit-item">
+                  <span className="edit-label">投稿者</span>
+                  <span>{selection.image.owner ?? '（管理者設置）'}</span>
+                </div>
+                <div className="edit-item">
+                  <span className="edit-label">投稿日時</span>
+                  <span>{formatTimestamp(selection.image.created_at)}</span>
                 </div>
                 {nameSavedNotice && <div className="muted">変更しました。</div>}
                 {error && <div className="error">{error}</div>}
@@ -686,13 +698,17 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
         )
       })()}
 
-      {/* 画像アップロードの確認画面。プレビューを見て、名前（display_name）を編集して登録する。 */}
+      {/* 画像アップロードの確認画面。ファイル名（変更不可＝original_name）を見せつつ、
+          「タイトル」（＝display_name）を編集して登録する。 */}
       {pending && (
         <div className="overlay dim" onClick={uploading ? undefined : cancelUpload}>
           <div className="panel" onClick={(e) => e.stopPropagation()}>
             <h2>この画像を登録しますか？</h2>
             <img className="upload-preview" src={pending.url} alt="" />
-            <label className="field">名前（この画像の題名になります）
+            <label className="field">ファイル名
+              <input type="text" value={pending.file.name} readOnly />
+            </label>
+            <label className="field">タイトル（この画像の題名になります）
               <input
                 type="text"
                 value={pendingName}
@@ -772,4 +788,9 @@ function UploadCard({ uploading, onFile }: { uploading: boolean; onFile: (file: 
 function clampGrid(value: number): number {
   if (!Number.isFinite(value)) return 2
   return Math.min(40, Math.max(2, Math.round(value)))
+}
+
+/** PostgreSQL の timestamptz 文字列を「YYYY-MM-DD HH:MM:SS」に整える。 */
+function formatTimestamp(ts: string): string {
+  return ts.replace('T', ' ').slice(0, 19)
 }

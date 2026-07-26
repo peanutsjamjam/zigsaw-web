@@ -127,7 +127,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
  * data URL で送る。EXIF の向きもここで畳んでおく。
  */
 export async function prepareUpload(file: Blob): Promise<{
-  display_name: string
+  original_name: string
   ext: 'jpg'
   width: number
   height: number
@@ -140,7 +140,7 @@ export async function prepareUpload(file: Blob): Promise<{
     const thumb = await toJpeg(bitmap, 600, 0.8)
     const name = (file instanceof File ? file.name : '') || 'untitled'
     return {
-      display_name: name,
+      original_name: name,
       ext: 'jpg',
       width: full.width,
       height: full.height,

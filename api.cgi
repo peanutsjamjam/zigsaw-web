@@ -43,8 +43,9 @@ use File::Basename qw(dirname);
 #   GET    ?action=dev_users                        -> 全ユーザー一覧（開発環境のみ。本番は404。salt/iterations は返さない）
 #   GET    ?action=dev_user_detail&id=<uid>         -> 指定ユーザーの画像/パズル/保存ゲーム（開発環境のみ）
 #   GET    ?action=images                           -> アップロード画像一覧（未ログインでも可）
-#   POST   ?action=image  {display_name,width,height,ext,full,thumb}
-#                                                   -> 画像アップロード（要ログイン。full/thumb は base64）
+#   POST   ?action=image  {display_name,original_name,width,height,ext,full,thumb}
+#                                                   -> 画像アップロード（要ログイン。full/thumb は base64。
+#                                                      display_name=タイトル、original_name=ファイル名）
 #   PUT    ?action=image&id=<id>  {display_name}    -> display_name を変更（本人または管理者）
 #   DELETE ?action=image&id=<id>                    -> 画像削除（本人または管理者。パズル/進行も CASCADE 削除）
 #   GET    ?action=puzzles                          -> 作成済みパズル一覧（誰でも。画像情報+作成者名つき）
@@ -440,6 +441,7 @@ sub image_row_to_json {
         width         => 0 + $row->{width},
         height        => 0 + $row->{height},
         owner         => $row->{owner_username},   # 投稿者名（管理者設置は null）
+        created_at    => $row->{created_at},        # 投稿日時
         mine          => $row->{mine} ? JSON::PP::true : JSON::PP::false,
         full_url      => "${base_url}images/full/$row->{basename}.$row->{ext}",
         thumb_url    => "${base_url}images/thumb/$row->{basename}.$row->{ext}",
@@ -783,7 +785,7 @@ eval {
         my $base = app_base_url();
 
         my $img_rows = $dbh->selectall_arrayref(
-            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height,
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at,
                     ou.username AS owner_username, false AS mine
                FROM images i LEFT JOIN users ou ON ou.id = i.owner_id
               WHERE i.owner_id = ? ORDER BY i.created_at DESC, i.id DESC',
@@ -830,7 +832,7 @@ eval {
         my $u = current_user($dbh);
         my $uid = $u ? $u->{id} : -1;
         my $rows = $dbh->selectall_arrayref(
-            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height,
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at,
                     ou.username AS owner_username,
                     (i.owner_id = ?) AS mine
                FROM images i
@@ -848,6 +850,11 @@ eval {
         $display_name =~ s/^\s+|\s+$//g;
         $display_name = 'untitled' if $display_name eq '';
         $display_name = substr($display_name, 0, 200);
+        # ファイル名（変更不可）。未指定なら display_name を流用（後方互換）。
+        my $original_name = defined $body->{original_name} ? $body->{original_name} : $display_name;
+        $original_name =~ s/^\s+|\s+$//g;
+        $original_name = $display_name if $original_name eq '';
+        $original_name = substr($original_name, 0, 200);
         my $ext = lc(defined $body->{ext} ? $body->{ext} : '');
         $ext = 'jpg' if $ext eq 'jpeg';
         # 拡張子はホワイトリスト（jpg/png/webp/gif）に限定する。html/svg 等は拒否。
@@ -877,14 +884,14 @@ eval {
             fail('image_write_failed', '500 Internal Server Error');
         };
 
-        # 当初は display_name と original_name に同じ値（アップロード時の名前）を入れる。
+        # display_name＝タイトル（編集可）、original_name＝ファイル名（変更不可）。
         my $id = $dbh->selectrow_array(
             'INSERT INTO images (owner_id, basename, ext, display_name, original_name, width, height)
              VALUES (?,?,?,?,?,?,?) RETURNING id',
-            undef, $u->{id}, $basename, $ext, $display_name, $display_name, $width, $height
+            undef, $u->{id}, $basename, $ext, $display_name, $original_name, $width, $height
         );
         my $row = $dbh->selectrow_hashref(
-            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height,
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at,
                     ?::text AS owner_username, true AS mine
                FROM images i WHERE i.id = ?',
             undef, $u->{username}, $id
@@ -906,7 +913,7 @@ eval {
             unless (defined $row->{owner_id} && $row->{owner_id} == $u->{id}) || pgbool($u->{is_admin}) == JSON::PP::true;
         $dbh->do('UPDATE images SET display_name = ? WHERE id = ?', undef, $display_name, $id);
         my $updated = $dbh->selectrow_hashref(
-            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height,
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at,
                     ou.username AS owner_username, (i.owner_id = ?) AS mine
                FROM images i LEFT JOIN users ou ON ou.id = i.owner_id WHERE i.id = ?',
             undef, $u->{id}, $id

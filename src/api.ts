@@ -20,6 +20,7 @@ export type GalleryImage = {
   width: number
   height: number
   owner: string | null   // 投稿者名。管理者が置いた画像は null
+  created_at: string     // 投稿日時
   mine: boolean          // ログイン中の自分がアップロードした画像か
   full_url: string       // 遊ぶ用の（縮小済み）画像
   thumb_url: string      // 一覧・完成図プレビュー用サムネイル
@@ -179,7 +180,7 @@ export const api = {
   deleteAccount: () => request<{ ok: true }>('?action=account', { method: 'DELETE' }),
 
   images: () => request<{ images: GalleryImage[] }>('?action=images').then((r) => r.images),
-  uploadImage: (payload: { display_name: string; ext: string; width: number; height: number; full: string; thumb: string }) =>
+  uploadImage: (payload: { display_name: string; original_name: string; ext: string; width: number; height: number; full: string; thumb: string }) =>
     postJson<{ image: GalleryImage }>('?action=image', payload).then((r) => r.image),
   updateImage: (id: number, display_name: string) =>
     request<{ image: GalleryImage }>(`?action=image&id=${id}`, { method: 'PUT', body: JSON.stringify({ display_name }) }).then((r) => r.image),
