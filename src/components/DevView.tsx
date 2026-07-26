@@ -64,7 +64,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
             <thead>
               <tr>
                 <th>id</th><th>username</th><th>email</th><th>created_at</th>
-                <th>画像</th><th>パズル</th><th>保存ゲーム</th><th>最終IP</th>
+                <th>画像</th><th>パズル</th><th>保存ゲーム</th><th>最終IP</th><th>最終アクセス</th>
               </tr>
             </thead>
             <tbody>
@@ -82,6 +82,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
                   <td className="num">{u.puzzle_count}</td>
                   <td className="num">{u.progress_count}</td>
                   <td>{u.last_ip ?? '—'}</td>
+                  <td>{u.last_access ? formatTimestamp(u.last_access) : '—'}</td>
                 </tr>
               ))}
             </tbody>

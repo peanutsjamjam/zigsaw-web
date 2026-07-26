@@ -51,7 +51,8 @@ export type DevUser = {
   image_bytes: number   // その人の画像ファイル（full）の合計バイト数
   puzzle_count: number
   progress_count: number
-  last_ip: string | null   // アクセスログ上の最新の送信元 IP。記録が無ければ null
+  last_ip: string | null       // アクセスログ上の最新の送信元 IP。記録が無ければ null
+  last_access: string | null   // 最終アクセス日時。記録が無ければ null
 }
 
 // 開発用: 指定ユーザーが登録した画像・作成したパズル・保存ゲーム（dev_user_detail が返す）。

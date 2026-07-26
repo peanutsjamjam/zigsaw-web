@@ -660,7 +660,9 @@ eval {
                     (SELECT count(*) FROM puzzles  p  WHERE p.creator_id = u.id) AS puzzle_count,
                     (SELECT count(*) FROM progress pr WHERE pr.user_id   = u.id) AS progress_count,
                     (SELECT host(a.ip_addr) FROM access_log a WHERE a.user_id = u.id
-                      ORDER BY a.accessed_at DESC LIMIT 1) AS last_ip
+                      ORDER BY a.accessed_at DESC LIMIT 1) AS last_ip,
+                    (SELECT a.accessed_at FROM access_log a WHERE a.user_id = u.id
+                      ORDER BY a.accessed_at DESC LIMIT 1) AS last_access
                FROM users u ORDER BY u.id',
             { Slice => {} }
         );
