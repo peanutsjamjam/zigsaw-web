@@ -34,14 +34,20 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
   const [dismissedCompletion, setDismissedCompletion] = useState(false)
   const [savedToast, setSavedToast] = useState(false)
   const [confirmingExit, setConfirmingExit] = useState(false)
+  // 自動保存が行われた瞬間だけ true にして、HUD の「自動保存」ボタンを一瞬光らせる。
+  const [autoSaveFlash, setAutoSaveFlash] = useState(false)
+  // 最後に保存した時点の visualRevision。自動保存で「変化があったときだけ」保存する判定に使う。
+  const lastSavedRevision = useRef(game.visualRevision)
 
   const save = useCallback(async () => {
     if (!canSave) return
+    const rev = game.visualRevision
     const viewState = viewProvider.current?.() ?? { scale: 1, panOffset: { x: 0, y: 0 } }
     const savedGame = game.exportSavedState(viewState.scale, viewState.panOffset)
     // 完成したパズルは常に完成図を出すので、途中経過の画像は付けない。
     const snapshot = game.isComplete ? undefined : (game.renderSnapshotDataUrl(settings.backgroundColor) ?? undefined)
     await api.saveProgress(puzzleId, { ...savedGame, snapshot })
+    lastSavedRevision.current = rev
   }, [canSave, game, puzzleId, settings.backgroundColor])
 
   const saveFromHUD = useCallback(() => {
@@ -56,6 +62,27 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
   useEffect(() => {
     if (game.isComplete && canSave) void save()
   }, [game.isComplete, canSave, save])
+
+  // 60秒ごとの自動保存（ログイン中で、設定でONのときのみ）。完成前で、前回保存から変化が
+  // あったときだけ保存する（未操作のまま放置しているときの無駄な書き込みを避ける）。
+  // タイマーや設定変更でタイマーを張り直さないよう ref 経由で判定・実行する。
+  const saveRef = useRef(save)
+  saveRef.current = save
+  const autoSaveRef = useRef(settings.autoSave)
+  autoSaveRef.current = settings.autoSave
+  useEffect(() => {
+    if (!canSave) return
+    const timer = window.setInterval(() => {
+      if (!autoSaveRef.current || game.isComplete) return
+      if (game.visualRevision === lastSavedRevision.current) return
+      void saveRef.current().then(() => {
+        // 保存できたら「自動保存」ボタンの各文字を左から順に光らせる（波が終わるまで保持）。
+        setAutoSaveFlash(true)
+        window.setTimeout(() => setAutoSaveFlash(false), 1300)
+      })
+    }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [canSave, game])
 
   const requestExit = useCallback(() => {
     // 完成済みは失うものが無いのでそのまま戻る。
@@ -84,15 +111,17 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
 
       <GameHUD
         game={game}
+        displayName={displayName}
         showElapsedTime={settings.showElapsedTime}
         backgroundColor={settings.backgroundColor}
         onBackgroundColorChange={(backgroundColor) => onSettingsChange({ ...settings, backgroundColor })}
         onToggleElapsedTime={() => onSettingsChange({ ...settings, showElapsedTime: !settings.showElapsedTime })}
         onExit={requestExit}
         onSave={canSave ? saveFromHUD : null}
+        autoSave={settings.autoSave}
+        autoSaveFlash={autoSaveFlash}
+        onToggleAutoSave={canSave ? () => onSettingsChange({ ...settings, autoSave: !settings.autoSave }) : null}
       />
-
-      <div className="game-title">{displayName}（{game.pieces.length}ピース）</div>
 
       {savedToast && <div className="toast">保存しました</div>}
 

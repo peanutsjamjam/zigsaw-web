@@ -9,6 +9,8 @@ import { BACKGROUND_SWATCHES, HUE_STEPS } from '../lib/settings'
 
 type Props = {
   game: PuzzleGameState
+  /** パズルの題名（ファイル名/タイトル）。「＜」の右に表示する。 */
+  displayName: string
   showElapsedTime: boolean
   backgroundColor: string
   onBackgroundColorChange: (color: string) => void
@@ -16,10 +18,17 @@ type Props = {
   onExit: () => void
   /** 保存する。未ログインで保存できないときは null（ボタンを出さない）。 */
   onSave: (() => void) | null
+  /** 自動保存の現在のON/OFF。 */
+  autoSave: boolean
+  /** 自動保存が実行された瞬間に true。ボタンを一瞬光らせる。 */
+  autoSaveFlash: boolean
+  /** 自動保存の切り替え。未ログインで保存できないときは null（ボタンを出さない）。 */
+  onToggleAutoSave: (() => void) | null
 }
 
 export function GameHUD({
-  game, showElapsedTime, backgroundColor, onBackgroundColorChange, onToggleElapsedTime, onExit, onSave,
+  game, displayName, showElapsedTime, backgroundColor, onBackgroundColorChange, onToggleElapsedTime,
+  onExit, onSave, autoSave, autoSaveFlash, onToggleAutoSave,
 }: Props) {
   const [showColorPicker, setShowColorPicker] = useState(false)
   // 見本を選ぶとその場で盤面に反映し、キャンセルならここへ戻す。
@@ -46,6 +55,8 @@ export function GameHUD({
         <ChevronLeft size={18} />
       </button>
 
+      <span className="hud-title">{displayName}（{game.pieces.length}ピース）</span>
+
       <button
         type="button"
         className="hud-btn"
@@ -57,6 +68,19 @@ export function GameHUD({
           : <Clock size={16} />}
       </button>
 
+      {onToggleAutoSave && (
+        <button
+          type="button"
+          className={`hud-btn autosave-btn${autoSaveFlash ? ' flash' : ''}`}
+          onClick={onToggleAutoSave}
+          title="60秒ごとの自動保存を切り替える"
+        >
+          {/* 自動保存された瞬間、各文字が左から順に黄色く光って戻る（文字ごとに遅延をずらす）。 */}
+          <span className="autosave-label">{[...`自動保存 (${autoSave ? 'ON' : 'OFF'})`].map((c, i) => (
+            <span key={i} className="ch" style={{ animationDelay: `${i * 55}ms` }}>{c === ' ' ? ' ' : c}</span>
+          ))}</span>
+        </button>
+      )}
       {onSave && (
         <button type="button" className="hud-btn" onClick={onSave}>
           <Save size={16} /> 保存する
@@ -70,11 +94,14 @@ export function GameHUD({
         <Palette size={16} /> 背景色を変更
       </button>
 
-      <button type="button" className="hud-btn" onClick={() => game.pause()} disabled={game.isPaused || game.isComplete}>
-        <Pause size={16} /> 一時停止
-      </button>
-      <button type="button" className="hud-btn" onClick={() => game.resume()} disabled={!game.isPaused || game.isComplete}>
-        <Play size={16} /> 再開
+      {/* 一時停止／再開は1つのトグルボタン。状態に応じてキャプションとアイコンが変わる。 */}
+      <button
+        type="button"
+        className="hud-btn"
+        onClick={() => (game.isPaused ? game.resume() : game.pause())}
+        disabled={game.isComplete}
+      >
+        {game.isPaused ? <><Play size={16} /> 再開</> : <><Pause size={16} /> 一時停止</>}
       </button>
 
       {showColorPicker && pickerPos && createPortal(

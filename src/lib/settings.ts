@@ -6,6 +6,8 @@ export type AppSettings = {
   backgroundColor: string
   /** HUD に経過時間を出すか。 */
   showElapsedTime: boolean
+  /** ゲーム中に60秒ごとの自動保存を行うか（ログイン中のみ意味を持つ）。 */
+  autoSave: boolean
 }
 
 export const SETTINGS_KEY = 'zigsaw-settings'
@@ -19,6 +21,7 @@ export function loadSettings(): AppSettings {
   const defaults: AppSettings = {
     backgroundColor: defaultBackgroundColor(),
     showElapsedTime: true,
+    autoSave: true,
   }
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
