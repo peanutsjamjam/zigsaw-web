@@ -12,7 +12,7 @@ use File::Basename qw(dirname);
 #
 # 配信:  Apache UserDir 配下、suexec で sugawara として実行される。
 #        そのため PostgreSQL へは peer 認証（パスワード不要）で接続できる。
-# DB:    zigsaw（users / sessions / signup_tokens / reset_tokens / images / progress）。
+# DB:    zigsaw（users / sessions / signup_tokens / reset_tokens / access_log / images / puzzles / progress）。
 #        定義は ddl/*.sql 参照。
 # 認証:  ログイン時にランダムトークンを sessions に保存し、HttpOnly Cookie
 #        (zigsaw_sid) で受け渡す。パスワードは PBKDF2-HMAC-SHA256 で保存。
@@ -200,6 +200,16 @@ sub db {
         { RaiseError => 1, AutoCommit => 1, PrintError => 0, pg_enable_utf8 => 1 }
     ) or fail('db_error', '500 Internal Server Error');
     return $dbh;
+}
+
+# アクセスログ: 送信元 IP（Apache が付ける REMOTE_ADDR）と、ログイン中ならその user_id を
+# 1行記録する。記録に失敗してもリクエスト自体は止めない（warn のみ）。未ログインは undef（NULL）。
+sub log_access {
+    my ($dbh, $user_id) = @_;
+    my $ip = $ENV{REMOTE_ADDR};
+    return unless defined $ip && $ip ne '';
+    eval { $dbh->do('INSERT INTO access_log (user_id, ip_addr) VALUES (?, ?)', undef, $user_id, $ip); 1 }
+        or warn "log_access failed: $@\n";
 }
 
 # ---- セッション ------------------------------------------------------------
@@ -425,6 +435,9 @@ eval {
 
     my $dbh = db();
 
+    # アクセスログ: リクエストごとに、送信元 IP と（ログイン中なら）その user_id を1行残す。
+    log_access($dbh, do { my $lu = current_user($dbh); $lu ? $lu->{id} : undef });
+
     if ($action eq 'signup_request' && $method eq 'POST') {
         my $body = read_body_json();
         my $email = defined $body->{email} ? $body->{email} : '';
@@ -645,7 +658,9 @@ eval {
             'SELECT u.id, u.username, u.email, u.is_admin, u.created_at,
                     (SELECT count(*) FROM images   i  WHERE i.owner_id   = u.id) AS image_count,
                     (SELECT count(*) FROM puzzles  p  WHERE p.creator_id = u.id) AS puzzle_count,
-                    (SELECT count(*) FROM progress pr WHERE pr.user_id   = u.id) AS progress_count
+                    (SELECT count(*) FROM progress pr WHERE pr.user_id   = u.id) AS progress_count,
+                    (SELECT host(a.ip_addr) FROM access_log a WHERE a.user_id = u.id
+                      ORDER BY a.accessed_at DESC LIMIT 1) AS last_ip
                FROM users u ORDER BY u.id',
             { Slice => {} }
         );

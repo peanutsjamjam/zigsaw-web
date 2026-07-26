@@ -64,7 +64,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
             <thead>
               <tr>
                 <th>id</th><th>username</th><th>email</th><th>created_at</th>
-                <th>画像</th><th>パズル</th><th>保存ゲーム</th>
+                <th>画像</th><th>パズル</th><th>保存ゲーム</th><th>最終IP</th>
               </tr>
             </thead>
             <tbody>
@@ -81,6 +81,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
                   <td className="num">{u.image_count} <span className="muted">（{formatBytes(u.image_bytes)}）</span></td>
                   <td className="num">{u.puzzle_count}</td>
                   <td className="num">{u.progress_count}</td>
+                  <td>{u.last_ip ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
