@@ -114,10 +114,11 @@ for my $name (@files) {
     eval {
         copy_file($src, "$IMAGE_DIR/full/$basename.$ext");
         copy_file($src, "$IMAGE_DIR/thumb/$basename.$ext");
+        # display_name と original_name にはファイル名（拡張子抜き）を入れる。upload_ip は NULL。
         $dbh->do(
-            'INSERT INTO images (owner_id, basename, ext, display_name, width, height)
-             VALUES (NULL, ?, ?, ?, ?, ?)',
-            undef, $basename, $ext, $base, $w, $h
+            'INSERT INTO images (owner_id, basename, ext, display_name, original_name, width, height)
+             VALUES (NULL, ?, ?, ?, ?, ?, ?)',
+            undef, $basename, $ext, $base, $base, $w, $h
         );
         unlink $src;
         1;
