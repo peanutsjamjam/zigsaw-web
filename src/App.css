@@ -60,12 +60,32 @@
 
 .splash { display: grid; place-items: center; height: 100%; color: var(--muted); }
 
+/* 上段（詳細）は固定、下段（各一覧）だけを縦スクロールさせるため、setup は画面高いっぱいの
+   フレックス縦積みにする。 */
 .setup {
-  min-height: 100%;
-  padding: 32px 40px 48px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 上段: タイトル＋選択中の詳細。スクロールしない。 */
+.setup-head {
+  flex: 0 0 auto;
+  padding: 24px 40px 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 16px;
+}
+/* 下段: 各一覧。区切り線を上に置き、この領域だけを縦スクロールさせる。 */
+.setup-lists {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding: 16px 40px 40px;
+  display: flex;
+  flex-direction: column;
   gap: 18px;
 }
 
@@ -617,7 +637,8 @@ input.mismatch { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger
 }
 
 @media (max-width: 700px) {
-  .setup { padding: 20px 16px 40px; }
+  .setup-head { padding: 16px 16px 12px; }
+  .setup-lists { padding: 12px 16px 32px; }
   .preview-box { width: min(460px, 88vw); height: 220px; }
   .preview-row { flex-direction: column; }
 }

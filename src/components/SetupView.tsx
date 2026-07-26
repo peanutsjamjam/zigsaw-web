@@ -211,6 +211,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   return (
     <div className="setup">
       {createdNotice && <div className="toast">パズルを作成しました</div>}
+
+      {/* 上段: タイトル＋選択中の詳細（常に見える。スクロールしない）。 */}
+      <div className="setup-head">
       <div className="setup-top">
         <h1 className="setup-title">
           {selection && <img className="title-shape" src={SHAPE_IMAGES.PlaceholderShape002} alt="" />}
@@ -447,7 +450,10 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           <PreviewBox url={undefined} />
         </div>
       )}
+      </div>
 
+      {/* 下段: 各一覧。ここだけを縦スクロールさせ、上段の詳細が常に見えるようにする。 */}
+      <div className="setup-lists">
       {error && <div className="error">{error}</div>}
 
       {/* 画像一覧（要ログイン） */}
@@ -514,6 +520,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           </div>
         </Section>
       )}
+      </div>
 
       {confirmingRemoval && (
         <div className="overlay dim">
