@@ -63,7 +63,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
           <table className="dev-table">
             <thead>
               <tr>
-                <th>id</th><th>username</th><th>email</th><th>created_at</th>
+                <th>id</th><th>username</th><th>email</th><th>管理者</th><th>created_at</th>
                 <th>画像</th><th>パズル</th><th>保存ゲーム</th><th>最終IP</th><th>最終アクセス</th>
               </tr>
             </thead>
@@ -77,6 +77,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
                   <td>{u.id}</td>
                   <td>{u.username}</td>
                   <td>{u.email}</td>
+                  <td>{u.is_admin ? '✓' : ''}</td>
                   <td>{formatTimestamp(u.created_at)}</td>
                   <td className="num">{u.image_count} <span className="muted">（{formatBytes(u.image_bytes)}）</span></td>
                   <td className="num">{u.puzzle_count}</td>

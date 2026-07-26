@@ -155,7 +155,7 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
             {canSave ? (
               <>
                 <h2>進行中のパズルがあります</h2>
-                <p className="muted">選択画面に戻る前に保存しますか？保存しない場合、この進行状況は失われます。</p>
+                <p className="muted">選択画面に戻る前に保存しますか？</p>
                 <div className="row">
                   <button type="button" className="btn primary" onClick={() => { void save().then(onExit) }}>保存して戻る</button>
                   <button type="button" className="btn" onClick={onExit}>保存せず戻る</button>
