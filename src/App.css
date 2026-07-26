@@ -254,6 +254,31 @@
     linear-gradient(to bottom, #fff 0 1px, transparent 1px);
 }
 
+/* パズル選択時の左カラム: タブ＋画像 */
+.puzzle-image { display: flex; flex-direction: column; gap: 8px; align-self: flex-start; }
+.image-tabs { display: flex; gap: 6px; }
+.image-tabs button {
+  flex: 1;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.image-tabs button.active { background: var(--accent); color: #fff; border-color: transparent; }
+/* 現在の様子がまだ保存されていないときの表示（画像の代わり） */
+.no-snapshot {
+  width: 640px;
+  max-width: 100%;
+  height: 240px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--muted) 60%, transparent);
+  font-size: 14px;
+}
+
 .edit-item { display: flex; flex-direction: column; gap: 3px; }
 .edit-label { font-size: 12px; color: var(--muted); }
 .edit-filename { word-break: break-all; }

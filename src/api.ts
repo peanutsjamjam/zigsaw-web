@@ -33,7 +33,8 @@ export type Puzzle = {
   columns: number
   rows: number
   creator: string | null   // 作成者名。退会済みは null
-  display_name: string     // もとの画像の題名
+  display_name: string     // もとの画像の題名（タイトル）
+  original_name: string    // もとの画像のファイル名
   width: number
   height: number
   full_url: string

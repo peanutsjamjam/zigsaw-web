@@ -453,12 +453,13 @@ sub puzzle_row_to_json {
         image_id     => 0 + $row->{image_id},
         columns      => 0 + $row->{columns},
         rows         => 0 + $row->{rows},
-        creator      => $row->{creator_username},   # 作成者名（退会済みは null）
-        display_name => $row->{display_name},
-        width        => 0 + $row->{width},
-        height       => 0 + $row->{height},
-        full_url     => "${base_url}images/full/$row->{basename}.$row->{ext}",
-        thumb_url    => "${base_url}images/thumb/$row->{basename}.$row->{ext}",
+        creator       => $row->{creator_username},   # 作成者名（退会済みは null）
+        display_name  => $row->{display_name},
+        original_name => $row->{original_name},
+        width         => 0 + $row->{width},
+        height        => 0 + $row->{height},
+        full_url      => "${base_url}images/full/$row->{basename}.$row->{ext}",
+        thumb_url     => "${base_url}images/thumb/$row->{basename}.$row->{ext}",
     };
 }
 
@@ -787,7 +788,7 @@ eval {
         );
         my $puz_rows = $dbh->selectall_arrayref(
             'SELECT p.id, p.image_id, p.columns, p.rows, cu.username AS creator_username,
-                    i.basename, i.ext, i.display_name, i.width, i.height
+                    i.basename, i.ext, i.display_name, i.original_name, i.width, i.height
                FROM puzzles p JOIN images i ON i.id = p.image_id
                LEFT JOIN users cu ON cu.id = p.creator_id
               WHERE p.creator_id = ? ORDER BY p.created_at DESC, p.id DESC',
@@ -796,7 +797,7 @@ eval {
         my $prog_rows = $dbh->selectall_arrayref(
             'SELECT pr.id, pr.puzzle_id, pr.state, pr.updated_at,
                     p.image_id, p.columns, p.rows, cu.username AS creator_username,
-                    i.basename, i.ext, i.display_name, i.width, i.height
+                    i.basename, i.ext, i.display_name, i.original_name, i.width, i.height
                FROM progress pr
                JOIN puzzles p ON p.id = pr.puzzle_id
                JOIN images i ON i.id = p.image_id
@@ -810,7 +811,8 @@ eval {
                 puzzle_id  => 0 + $_->{puzzle_id},
                 state      => (eval { $JSON->decode($_->{state}) } || {}),
                 updated_at => $_->{updated_at},
-                puzzle     => puzzle_row_to_json($base, $_),
+                # $_->{id} は progress 行の id なので、パズルの id（=puzzle_id）で上書きして渡す。
+                puzzle     => puzzle_row_to_json($base, { %$_, id => $_->{puzzle_id} }),
             }
         } @$prog_rows;
 
@@ -925,7 +927,7 @@ eval {
         my $rows = $dbh->selectall_arrayref(
             'SELECT p.id, p.image_id, p.columns, p.rows,
                     cu.username AS creator_username,
-                    i.basename, i.ext, i.display_name, i.width, i.height
+                    i.basename, i.ext, i.display_name, i.original_name, i.width, i.height
                FROM puzzles p
                JOIN images i ON i.id = p.image_id
                LEFT JOIN users cu ON cu.id = p.creator_id
@@ -955,7 +957,7 @@ eval {
         my $row = $dbh->selectrow_hashref(
             'SELECT p.id, p.image_id, p.columns, p.rows,
                     cu.username AS creator_username,
-                    i.basename, i.ext, i.display_name, i.width, i.height
+                    i.basename, i.ext, i.display_name, i.original_name, i.width, i.height
                FROM puzzles p
                JOIN images i ON i.id = p.image_id
                LEFT JOIN users cu ON cu.id = p.creator_id
@@ -971,7 +973,7 @@ eval {
             'SELECT pr.id, pr.puzzle_id, pr.state, pr.updated_at,
                     p.image_id, p.columns, p.rows,
                     cu.username AS creator_username,
-                    i.basename, i.ext, i.display_name, i.width, i.height
+                    i.basename, i.ext, i.display_name, i.original_name, i.width, i.height
                FROM progress pr
                JOIN puzzles p ON p.id = pr.puzzle_id
                JOIN images i ON i.id = p.image_id
@@ -988,7 +990,8 @@ eval {
                 puzzle_id  => 0 + $r->{puzzle_id},
                 state      => (eval { $JSON->decode($r->{state}) } || {}),   # JSONB は文字列で来る
                 updated_at => $r->{updated_at},
-                puzzle     => puzzle_row_to_json($base, $r),
+                # $r->{id} は progress 行の id なので、パズルの id（=puzzle_id）で上書きして渡す。
+                puzzle     => puzzle_row_to_json($base, { %$r, id => $r->{puzzle_id} }),
             };
         }
         respond({ progress => \@out });

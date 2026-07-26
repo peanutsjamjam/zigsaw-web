@@ -57,6 +57,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [editName, setEditName] = useState('')
   const [savingName, setSavingName] = useState(false)
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
+  // プレイ中パズルの画像エリアのタブ（完成図 / 現在の様子）。既定は「現在の様子」。
+  const [puzzleTab, setPuzzleTab] = useState<'finished' | 'current'>('current')
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -93,7 +95,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     setRows(4)
     setError(null)
   }
-  const selectPuzzle = (puzzle: Puzzle) => setSelection({ kind: 'puzzle', puzzle })
+  const selectPuzzle = (puzzle: Puzzle) => { setSelection({ kind: 'puzzle', puzzle }); setPuzzleTab('current') }
 
   // ログイン中の自分の画像（または管理者）のみ display_name を変更できる。
   const canEditName = selection?.kind === 'image' && (selection.image.mine || account?.is_admin === true)
@@ -206,10 +208,6 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     }
   }
 
-  const previewUrl = selection?.kind === 'image' ? selection.image.thumb_url
-    : selection?.kind === 'puzzle' ? selection.puzzle.thumb_url
-    : undefined
-
   return (
     <div className="setup">
       {createdNotice && <div className="toast">パズルを作成しました</div>}
@@ -244,26 +242,6 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             <X size={18} />
           </button>
 
-          {/* 画像を選んだとき（修正・作成のどちらも）は左に画像・右にコントロールの2カラム。
-              パズルを選んだときだけ、上にプレビュー（完成図／現在の様子）を出す。 */}
-          {selection.kind === 'puzzle' && (
-            <div className="preview-row">
-              {selectedStatus === 'inProgress' ? (
-                <>
-                  <div className="preview-slot">
-                    <span className="preview-caption">完成図</span>
-                    <PreviewBox url={selection.puzzle.thumb_url} />
-                  </div>
-                  <div className="preview-slot">
-                    <span className="preview-caption">現在の様子</span>
-                    <PreviewBox url={selectedProgress?.state.snapshot} />
-                  </div>
-                </>
-              ) : (
-                <PreviewBox url={previewUrl} />
-              )}
-            </div>
-          )}
 
           {/* 画像を選んだとき（mode:'edit'）: 左に画像、右にファイル名・タイトル編集・サイズ・各ボタン。 */}
           {selection.kind === 'image' && selection.mode === 'edit' && (
@@ -409,24 +387,60 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             </div>
           )}
 
-          {selection.kind === 'puzzle' && (
-            <div className="selected-info">
-              <div className="selected-name">{selection.puzzle.display_name}</div>
-              <div className="muted">
-                {selection.puzzle.columns} x {selection.puzzle.rows}（{selection.puzzle.columns * selection.puzzle.rows}ピース）
+          {/* パズルを選んだとき: 左に画像（プレイ中は完成図／現在の様子のタブ切替）、右に情報。 */}
+          {selection.kind === 'puzzle' && (() => {
+            // プレイ中なら（スナップショット画像の有無に関わらず）必ずタブを出す。
+            const showTabs = selectedStatus === 'inProgress'
+            const snapshotUrl = selectedProgress?.state.snapshot
+            const showCurrent = showTabs && puzzleTab === 'current'
+            return (
+              <div className="edit-layout">
+                <div className="puzzle-image">
+                  {showTabs && (
+                    <div className="image-tabs">
+                      <button type="button" className={puzzleTab === 'finished' ? 'active' : ''} onClick={() => setPuzzleTab('finished')}>完成図</button>
+                      <button type="button" className={puzzleTab === 'current' ? 'active' : ''} onClick={() => setPuzzleTab('current')}>現在の様子</button>
+                    </div>
+                  )}
+                  <div className="edit-image">
+                    {showCurrent
+                      ? (snapshotUrl
+                          ? <img src={snapshotUrl} alt="" />
+                          : <div className="no-snapshot muted">現在の様子はまだ保存されていません</div>)
+                      : <img src={selection.puzzle.thumb_url} alt="" />}
+                  </div>
+                </div>
+                <div className="edit-fields">
+                  <div className="edit-item">
+                    <span className="edit-label">ファイル名</span>
+                    <span className="edit-filename">{selection.puzzle.original_name}</span>
+                  </div>
+                  <div className="edit-item">
+                    <span className="edit-label">タイトル</span>
+                    <span>{selection.puzzle.display_name}</span>
+                  </div>
+                  <div className="edit-item">
+                    <span className="edit-label">画像のサイズ</span>
+                    <span>{selection.puzzle.width} x {selection.puzzle.height}</span>
+                  </div>
+                  <div className="edit-item">
+                    <span className="edit-label">ピース数</span>
+                    <span>{selection.puzzle.columns} x {selection.puzzle.rows}（{selection.puzzle.columns * selection.puzzle.rows}ピース）</span>
+                  </div>
+                  {selectedStatus !== 'notStarted' && <div className={`status ${selectedStatus}`}>{STATUS_TEXT[selectedStatus]}</div>}
+                  {!account && <div className="muted">※ ログインすると途中経過を保存できます</div>}
+                  <div className="row edit-buttons">
+                    <button type="button" className="btn primary large" onClick={playSelectedPuzzle} disabled={busy}>
+                      {busy ? '準備中…'
+                        : selectedStatus === 'inProgress' ? 'このパズルを再開する'
+                        : selectedStatus === 'completed' ? 'このパズルで再度遊ぶ'
+                        : 'このパズルをプレイする'}
+                    </button>
+                  </div>
+                </div>
               </div>
-              {selectedStatus !== 'notStarted' && <div className={`status ${selectedStatus}`}>{STATUS_TEXT[selectedStatus]}</div>}
-              {!account && <div className="muted">※ ログインすると途中経過を保存できます</div>}
-              <div className="row">
-                <button type="button" className="btn primary large" onClick={playSelectedPuzzle} disabled={busy}>
-                  {busy ? '準備中…'
-                    : selectedStatus === 'inProgress' ? 'このパズルを再開する'
-                    : selectedStatus === 'completed' ? 'このパズルで再度遊ぶ'
-                    : 'このパズルをプレイする'}
-                </button>
-              </div>
-            </div>
-          )}
+            )
+          })()}
         </div>
       ) : (
         <div className="preview-row">
