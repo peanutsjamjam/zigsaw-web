@@ -330,6 +330,7 @@
   gap: 14px;
 }
 .auth-logo { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; justify-content: center; }
+.auth-logo-shape { width: 30px; height: 30px; object-fit: contain; }
 .auth-sub { margin: 0; font-size: 13px; color: var(--muted); text-align: center; }
 .auth-tabs { display: flex; gap: 6px; }
 .auth-tabs button {
@@ -345,9 +346,9 @@
 .auth-card label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .auth-card input { color: var(--text); }
 .auth-card input.input-error { border-color: var(--danger); }
-/* パスワード確認欄の一致=緑 / 不一致=赤（nenpyo と同じ挙動） */
-.auth-card input.match { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok); }
-.auth-card input.mismatch { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+/* パスワード確認欄の一致=緑 / 不一致=赤（新規登録・再設定・パスワード変更で共通） */
+input.match { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok); }
+input.mismatch { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
 .field-error { color: var(--danger); font-size: 12px; }
 .auth-error { color: var(--danger); font-size: 13px; text-align: center; }
 .auth-success { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--ok); font-weight: 600; }

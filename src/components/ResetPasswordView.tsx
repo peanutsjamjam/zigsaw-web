@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Puzzle } from 'lucide-react'
 import { api, ApiError, type Account } from '../api'
+import { AuthLogo } from './AuthLogo'
 
 // パスワード再設定リンク（?reset=<token>）から入る画面。トークンを検証して
 // メールアドレスを確かめ、新しいパスワードを設定してそのままログインする。
@@ -44,7 +44,7 @@ export function ResetPasswordView({ token, onAuthed, onRestart }: {
   return (
     <div className="auth-wrap">
       <form className="auth-card" onSubmit={submit}>
-        <div className="auth-logo"><Puzzle size={26} /> <span>Zigsaw</span></div>
+        <AuthLogo />
         {invalid ? (<>
           <p className="auth-sub" style={{ fontWeight: 600 }}>リンクが無効です</p>
           <p className="auth-sub" style={{ margin: 0 }}>この再設定用リンクは無効か、期限切れです。もう一度「パスワードをお忘れですか？」からやり直してください。</p>

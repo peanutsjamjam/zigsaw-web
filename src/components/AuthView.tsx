@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Puzzle, MailCheck, ArrowLeft } from 'lucide-react'
+import { MailCheck, ArrowLeft } from 'lucide-react'
 import { api, ApiError, type Account } from '../api'
+import { AuthLogo } from './AuthLogo'
 
 // ログイン / 新規登録（サインアップは「メール入力→確認リンク送信」まで）/ パスワード再設定申請。
 // mac 版には無い、Web 版で「途中経過を保存するため」に足した認証画面。nenpyo の AuthView を移植。
@@ -55,7 +56,7 @@ export function AuthView({ onAuthed, onCancel, overlay = false }: {
 
   const card = (
     <form className="auth-card" onSubmit={submit} onClick={overlay ? (e) => e.stopPropagation() : undefined}>
-      <div className="auth-logo"><Puzzle size={26} /> <span>Zigsaw</span></div>
+      <AuthLogo />
       <p className="auth-sub">ログインすると、パズルの途中経過を保存して続きから遊べます。</p>
 
       {mode === 'forgot' ? (

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Puzzle } from 'lucide-react'
 import { api, ApiError, type Account } from '../api'
+import { AuthLogo } from './AuthLogo'
 
 // メール確認リンク（?signup=<token>）から入る「新規登録の2段階目」。
 // トークンを検証してメールアドレスを確かめ、ユーザー名とパスワードを設定して登録を完了する。
@@ -54,7 +54,7 @@ export function SignupCompleteView({ token, onAuthed, onRestart }: {
   return (
     <div className="auth-wrap">
       <form className="auth-card" onSubmit={submit}>
-        <div className="auth-logo"><Puzzle size={26} /> <span>Zigsaw</span></div>
+        <AuthLogo />
         {invalid ? (<>
           <p className="auth-sub" style={{ fontWeight: 600 }}>リンクが無効です</p>
           <p className="auth-sub" style={{ margin: 0 }}>この登録用リンクは無効か、期限切れです。お手数ですが、もう一度新規登録からやり直してください。</p>

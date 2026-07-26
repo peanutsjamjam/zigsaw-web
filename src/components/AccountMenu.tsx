@@ -41,13 +41,21 @@ export function AccountMenu({ account, onRequestLogin, onLoggedOut }: {
 function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
+  const [next2, setNext2] = useState('')
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(false)
+  // 新しいパスワード2欄の一致状態。いずれかに入力があれば 一致=緑 / 不一致=赤 の枠を出す。
+  const anyPwFilled = next !== '' || next2 !== ''
+  const pwClass = anyPwFilled ? (next === next2 ? 'match' : 'mismatch') : ''
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    if (next !== next2) {
+      setError('新しいパスワードが一致しません。')
+      return
+    }
     setBusy(true)
     try {
       await api.changePassword(current, next)
@@ -71,7 +79,10 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
             <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" autoFocus />
           </label>
           <label className="field">新しいパスワード（4文字以上）
-            <input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+            <input type="password" className={pwClass} value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+          </label>
+          <label className="field">新しいパスワード（確認）
+            <input type="password" className={pwClass} value={next2} onChange={(e) => setNext2(e.target.value)} autoComplete="new-password" />
           </label>
           {error && <div className="error">{error}</div>}
           <div className="row">
