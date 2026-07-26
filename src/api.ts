@@ -33,6 +33,8 @@ export type Puzzle = {
   columns: number
   rows: number
   creator: string | null   // 作成者名。退会済みは null
+  mine: boolean            // ログイン中の自分が作成したパズルか
+  play_count: number       // このパズルの進行状況の数（＝プレイ中／クリア済みの人数）
   display_name: string     // もとの画像の題名（タイトル）
   original_name: string    // もとの画像のファイル名
   width: number
@@ -117,6 +119,7 @@ const MESSAGES: Record<string, string> = {
   image_write_failed: '画像の保存に失敗しました。',
   grid_invalid: 'ピース数の指定が正しくありません（縦横それぞれ2〜40）。',
   bad_request: 'リクエストが正しくありません。',
+  puzzle_in_use: 'このパズルは、すでにプレイしている人がいるため削除できません。',
   mail_failed: 'メールの送信に失敗しました。時間をおいて試してください。',
   forbidden: 'この操作をする権限がありません。',
   not_found: '見つかりませんでした。',
@@ -185,6 +188,7 @@ export const api = {
   puzzles: () => request<{ puzzles: Puzzle[] }>('?action=puzzles').then((r) => r.puzzles),
   createPuzzle: (image_id: number, columns: number, rows: number) =>
     postJson<{ puzzle: Puzzle }>('?action=puzzle', { image_id, columns, rows }).then((r) => r.puzzle),
+  deletePuzzle: (id: number) => request<{ ok: true }>(`?action=puzzle&id=${id}`, { method: 'DELETE' }),
 
   progress: () => request<{ progress: ProgressItem[] }>('?action=progress').then((r) => r.progress),
   saveProgress: (puzzle_id: number, state: SavedProgress) =>

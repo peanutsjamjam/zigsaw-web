@@ -32,10 +32,11 @@ type Props = {
 // 選択中のもの。
 //   画像を選ぶと、まず画像情報の修正画面（mode:'edit'）を出し、そこから
 //   「この画像でパズルを作成する」で従来のピース数決定画面（mode:'create'）へ進む。
-//   パズルを選べばプレイ/再開。
+//   パズルは、パズル一覧から選ぶと編集画面（mode:'edit'。ピース数変更不可＋削除）、
+//   プレイしたパズルから選ぶとプレイ画面（mode:'play'。完成図/現在の様子タブ＋再開）。
 type Selection =
   | { kind: 'image'; image: GalleryImage; mode: 'edit' | 'create' }
-  | { kind: 'puzzle'; puzzle: Puzzle }
+  | { kind: 'puzzle'; puzzle: Puzzle; mode: 'edit' | 'play' }
 
 export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, onLoggedOut, busy }: Props) {
   const [images, setImages] = useState<GalleryImage[]>([])
@@ -53,6 +54,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [pending, setPending] = useState<{ file: File; url: string } | null>(null)
   const [pendingName, setPendingName] = useState('')
   const [confirmingRemoval, setConfirmingRemoval] = useState<GalleryImage | null>(null)
+  const [confirmingPuzzleRemoval, setConfirmingPuzzleRemoval] = useState<Puzzle | null>(null)
+  const [confirmingProgressRemoval, setConfirmingProgressRemoval] = useState<ProgressItem | null>(null)
   // 画像情報修正画面での display_name の編集値と、保存中フラグ・完了通知。
   const [editName, setEditName] = useState('')
   const [savingName, setSavingName] = useState(false)
@@ -95,7 +98,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     setRows(4)
     setError(null)
   }
-  const selectPuzzle = (puzzle: Puzzle) => { setSelection({ kind: 'puzzle', puzzle }); setPuzzleTab('current') }
+  // パズル一覧から選ぶと編集画面、プレイしたパズルから選ぶとプレイ画面。
+  const selectPuzzleForEdit = (puzzle: Puzzle) => { setSelection({ kind: 'puzzle', puzzle, mode: 'edit' }); setError(null) }
+  const selectPuzzleForPlay = (puzzle: Puzzle) => { setSelection({ kind: 'puzzle', puzzle, mode: 'play' }); setPuzzleTab('current') }
 
   // ログイン中の自分の画像（または管理者）のみ display_name を変更できる。
   const canEditName = selection?.kind === 'image' && (selection.image.mine || account?.is_admin === true)
@@ -167,7 +172,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     try {
       const puzzle = await api.createPuzzle(selection.image.id, columns, rows)
       await reload()
-      setSelection({ kind: 'puzzle', puzzle })
+      setSelection({ kind: 'puzzle', puzzle, mode: 'edit' })
       setCreatedNotice(true)
       window.setTimeout(() => setCreatedNotice(false), 2000)
     } catch (err) {
@@ -390,8 +395,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             </div>
           )}
 
-          {/* パズルを選んだとき: 左に画像（プレイ中は完成図／現在の様子のタブ切替）、右に情報。 */}
-          {selection.kind === 'puzzle' && (() => {
+          {/* プレイしたパズルから選んだとき（mode:'play'）: 左に画像（プレイ中は完成図／現在の様子の
+              タブ切替）、右に情報＋再開ボタン。 */}
+          {selection.kind === 'puzzle' && selection.mode === 'play' && (() => {
             // プレイ中なら（スナップショット画像の有無に関わらず）必ずタブを出す。
             const showTabs = selectedStatus === 'inProgress'
             const snapshotUrl = selectedProgress?.state.snapshot
@@ -440,6 +446,72 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                         : 'このパズルをプレイする'}
                     </button>
                   </div>
+                  {selectedProgress && (
+                    <div className="row edit-buttons">
+                      <button type="button" className="btn danger" onClick={() => setConfirmingProgressRemoval(selectedProgress)} disabled={busy}>
+                        <Trash2 size={16} /> {selectedStatus === 'completed' ? 'クリア記録を削除する' : 'この記録を削除する'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* パズル一覧から選んだとき（mode:'edit'）: 作成画面と同様（画像＋分割線＋情報）だが、
+              ピース数は変更不可・作成ボタン無し。プレイと削除のボタンを置く。 */}
+          {selection.kind === 'puzzle' && selection.mode === 'edit' && (() => {
+            const p = selection.puzzle
+            const canDelete = p.mine || account?.is_admin === true
+            const inUse = p.play_count > 0
+            return (
+              <div className="edit-layout">
+                <div
+                  className="piece-grid"
+                  style={{
+                    width: `min(640px, calc(60vh * ${p.width} / ${p.height}))`,
+                    aspectRatio: `${p.width} / ${p.height}`,
+                  }}
+                >
+                  <img src={p.thumb_url} alt="" />
+                  <div className="piece-grid-lines" style={{ backgroundSize: `calc(100% / ${p.columns}) calc(100% / ${p.rows})` }} />
+                </div>
+                <div className="edit-fields">
+                  <div className="edit-item">
+                    <span className="edit-label">ファイル名</span>
+                    <span className="edit-filename">{p.original_name}</span>
+                  </div>
+                  <div className="edit-item">
+                    <span className="edit-label">タイトル</span>
+                    <span>{p.display_name}</span>
+                  </div>
+                  <div className="edit-item">
+                    <span className="edit-label">画像のサイズ</span>
+                    <span>{p.width} x {p.height}</span>
+                  </div>
+                  <div className="edit-item">
+                    <span className="edit-label">ピース数</span>
+                    <span>{p.columns} x {p.rows}（{p.columns * p.rows}ピース）</span>
+                  </div>
+                  {selectedStatus !== 'notStarted' && <div className={`status ${selectedStatus}`}>{STATUS_TEXT[selectedStatus]}</div>}
+                  <div className="row edit-buttons">
+                    <button type="button" className="btn primary large" onClick={playSelectedPuzzle} disabled={busy}>
+                      {busy ? '準備中…'
+                        : selectedStatus === 'inProgress' ? 'このパズルを再開する'
+                        : selectedStatus === 'completed' ? 'このパズルで再度遊ぶ'
+                        : 'このパズルをプレイする'}
+                    </button>
+                  </div>
+                  {canDelete && (
+                    <>
+                      <div className="row edit-buttons">
+                        <button type="button" className="btn danger" onClick={() => setConfirmingPuzzleRemoval(p)} disabled={busy || inUse}>
+                          <Trash2 size={16} /> このパズルを削除する
+                        </button>
+                      </div>
+                      {inUse && <div className="muted">すでにプレイしている人がいるため削除できません。</div>}
+                    </>
+                  )}
                 </div>
               </div>
             )
@@ -486,7 +558,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
               key={puzzle.id}
               type="button"
               className={`card${selection?.kind === 'puzzle' && selection.puzzle.id === puzzle.id ? ' selected' : ''}`}
-              onClick={() => selectPuzzle(puzzle)}
+              onClick={() => selectPuzzleForEdit(puzzle)}
             >
               <div className="card-thumb"><img src={puzzle.thumb_url} alt="" /></div>
               <div className="card-name">{puzzle.display_name}</div>
@@ -508,7 +580,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                   key={item.id}
                   type="button"
                   className={`card${selection?.kind === 'puzzle' && selection.puzzle.id === item.puzzle_id ? ' selected' : ''}`}
-                  onClick={() => selectPuzzle(item.puzzle)}
+                  onClick={() => selectPuzzleForPlay(item.puzzle)}
                 >
                   <div className="card-thumb"><img src={item.puzzle.thumb_url} alt="" /></div>
                   <div className="card-name">{item.puzzle.display_name}</div>
@@ -546,6 +618,73 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           </div>
         </div>
       )}
+
+      {confirmingPuzzleRemoval && (
+        <div className="overlay dim">
+          <div className="panel">
+            <h2>このパズルを削除しますか？</h2>
+            <p className="muted">
+              「{confirmingPuzzleRemoval.display_name}」（{confirmingPuzzleRemoval.columns} x {confirmingPuzzleRemoval.rows}）を削除します。この操作は取り消せません。
+            </p>
+            {error && <div className="error">{error}</div>}
+            <div className="row">
+              <button
+                type="button" className="btn danger"
+                onClick={async () => {
+                  try {
+                    await api.deletePuzzle(confirmingPuzzleRemoval.id)
+                    setSelection(null)
+                    setConfirmingPuzzleRemoval(null)
+                    await reload()
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : String(err))
+                    setConfirmingPuzzleRemoval(null)
+                  }
+                }}
+              >
+                削除
+              </button>
+              <button type="button" className="btn" onClick={() => setConfirmingPuzzleRemoval(null)}>キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmingProgressRemoval && (() => {
+        const item = confirmingProgressRemoval
+        const cleared = statusFromState(item.state, item.puzzle.columns, item.puzzle.rows) === 'completed'
+        return (
+          <div className="overlay dim">
+            <div className="panel">
+              <h2>{cleared ? 'クリア記録を削除しますか？' : 'この記録を削除しますか？'}</h2>
+              <p className="muted">
+                「{item.puzzle.display_name}」（{item.puzzle.columns} x {item.puzzle.rows}）の
+                {cleared ? 'クリア記録' : '途中経過'}を削除します。この操作は取り消せません。
+              </p>
+              {error && <div className="error">{error}</div>}
+              <div className="row">
+                <button
+                  type="button" className="btn danger"
+                  onClick={async () => {
+                    try {
+                      await api.deleteProgress(item.id)
+                      setSelection(null)
+                      setConfirmingProgressRemoval(null)
+                      await reload()
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err))
+                      setConfirmingProgressRemoval(null)
+                    }
+                  }}
+                >
+                  削除
+                </button>
+                <button type="button" className="btn" onClick={() => setConfirmingProgressRemoval(null)}>キャンセル</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 画像アップロードの確認画面。プレビューを見て、名前（display_name）を編集して登録する。 */}
       {pending && (

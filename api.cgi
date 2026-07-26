@@ -49,6 +49,7 @@ use File::Basename qw(dirname);
 #   DELETE ?action=image&id=<id>                    -> 画像削除（本人または管理者。パズル/進行も CASCADE 削除）
 #   GET    ?action=puzzles                          -> 作成済みパズル一覧（誰でも。画像情報+作成者名つき）
 #   POST   ?action=puzzle {image_id,columns,rows}   -> パズルを作成（同じ画像+グリッドは1つに束ねる。要ログイン）
+#   DELETE ?action=puzzle&id=<id>                   -> パズル削除（作成者/管理者。プレイ中の人がいると 409）
 #   GET    ?action=progress                         -> 自分の途中経過一覧（要ログイン。パズル+画像情報つき）
 #   PUT    ?action=progress {puzzle_id,state}       -> 途中経過を保存（upsert。要ログイン）
 #   DELETE ?action=progress&id=<id>                 -> 途中経過を削除（要ログイン）
@@ -454,6 +455,8 @@ sub puzzle_row_to_json {
         columns      => 0 + $row->{columns},
         rows         => 0 + $row->{rows},
         creator       => $row->{creator_username},   # 作成者名（退会済みは null）
+        mine          => $row->{mine} ? JSON::PP::true : JSON::PP::false,   # 作成者が自分か
+        play_count    => 0 + ($row->{play_count} // 0),   # このパズルの進行状況の数（プレイ中の人数）
         display_name  => $row->{display_name},
         original_name => $row->{original_name},
         width         => 0 + $row->{width},
@@ -924,15 +927,19 @@ eval {
     }
     elsif ($action eq 'puzzles' && $method eq 'GET') {
         # 作成済みパズルの一覧（誰でも見られる）。新しい順。
+        # mine=作成者が自分か、play_count=そのパズルの進行状況（＝プレイ中/クリア済みの人）の数。
+        my $u = current_user($dbh);
+        my $uid = $u ? $u->{id} : -1;
         my $rows = $dbh->selectall_arrayref(
             'SELECT p.id, p.image_id, p.columns, p.rows,
-                    cu.username AS creator_username,
+                    cu.username AS creator_username, (p.creator_id = ?) AS mine,
+                    (SELECT count(*) FROM progress pr WHERE pr.puzzle_id = p.id) AS play_count,
                     i.basename, i.ext, i.display_name, i.original_name, i.width, i.height
                FROM puzzles p
                JOIN images i ON i.id = p.image_id
                LEFT JOIN users cu ON cu.id = p.creator_id
               ORDER BY p.created_at DESC, p.id DESC',
-            { Slice => {} }
+            { Slice => {} }, $uid
         );
         my $base = app_base_url();
         respond({ puzzles => [ map { puzzle_row_to_json($base, $_) } @$rows ] });
@@ -956,15 +963,30 @@ eval {
         );
         my $row = $dbh->selectrow_hashref(
             'SELECT p.id, p.image_id, p.columns, p.rows,
-                    cu.username AS creator_username,
+                    cu.username AS creator_username, (p.creator_id = ?) AS mine,
+                    (SELECT count(*) FROM progress pr WHERE pr.puzzle_id = p.id) AS play_count,
                     i.basename, i.ext, i.display_name, i.original_name, i.width, i.height
                FROM puzzles p
                JOIN images i ON i.id = p.image_id
                LEFT JOIN users cu ON cu.id = p.creator_id
               WHERE p.image_id = ? AND p.columns = ? AND p.rows = ?',
-            undef, $image_id, $columns, $rows
+            undef, $u->{id}, $image_id, $columns, $rows
         );
         respond({ puzzle => puzzle_row_to_json(app_base_url(), $row) }, '201 Created');
+    }
+    elsif ($action eq 'puzzle' && $method eq 'DELETE') {
+        # パズルを削除する（要ログイン。作成者または管理者）。
+        # すでにそのパズルでプレイしている人（progress がある人）がいる場合は削除しない。
+        my $u = require_user($dbh);
+        my $id = int(query_param('id') || 0);
+        my $row = $dbh->selectrow_hashref('SELECT * FROM puzzles WHERE id = ?', undef, $id);
+        fail('not_found', '404 Not Found') unless $row;
+        fail('forbidden', '403 Forbidden')
+            unless (defined $row->{creator_id} && $row->{creator_id} == $u->{id}) || pgbool($u->{is_admin}) == JSON::PP::true;
+        my $players = $dbh->selectrow_array('SELECT count(*) FROM progress WHERE puzzle_id = ?', undef, $id);
+        fail('puzzle_in_use', '409 Conflict') if $players > 0;
+        $dbh->do('DELETE FROM puzzles WHERE id = ?', undef, $id);
+        respond({ ok => JSON::PP::true });
     }
     elsif ($action eq 'progress' && $method eq 'GET') {
         # 自分の途中経過を、パズル＋画像の情報つきで返す（「プレイしたパズル」用）。
