@@ -353,9 +353,13 @@ sub start_session {
 }
 
 # ---- 画像 ------------------------------------------------------------------
-# ファイル名に使ってよい安全な basename/ext か確認する。
+# ファイル名に使ってよい安全な basename か確認する。
 sub safe_basename { my $s = shift; return defined $s && $s =~ /^[0-9a-f]{16,64}$/; }
-sub safe_ext      { my $s = shift; return defined $s && $s =~ /^[a-z0-9]{1,5}$/; }
+
+# アップロードで受け付ける画像の拡張子（正規化後）。html/svg/js などを弾いて保存型 XSS を防ぐ。
+# 入力の jpeg はアップロード処理で jpg に正規化してからこの集合で判定する。
+my %ALLOWED_IMAGE_EXT = map { $_ => 1 } qw(jpg png webp gif);
+sub allowed_image_ext { my $s = shift; return defined $s && $ALLOWED_IMAGE_EXT{$s}; }
 
 # base64（data URL 前置きがあれば剥がす）をデコードして返す。長さ超過なら fail。
 sub decode_upload {
@@ -739,7 +743,8 @@ eval {
         $display_name = substr($display_name, 0, 200);
         my $ext = lc(defined $body->{ext} ? $body->{ext} : '');
         $ext = 'jpg' if $ext eq 'jpeg';
-        fail('image_ext_invalid') unless safe_ext($ext);
+        # 拡張子はホワイトリスト（jpg/png/webp/gif）に限定する。html/svg 等は拒否。
+        fail('image_ext_invalid') unless allowed_image_ext($ext);
         my $width  = int($body->{width}  || 0);
         my $height = int($body->{height} || 0);
         fail('image_dimensions_invalid') if $width < 1 || $height < 1 || $width > 20000 || $height > 20000;
