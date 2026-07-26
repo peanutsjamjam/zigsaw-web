@@ -246,6 +246,13 @@
   border-radius: 999px;
   background: var(--panel-2);
 }
+/* いま選んでいるピース数と一致するパズルを枠で強調する。 */
+.grid-chip.current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
 .selected-name { font-weight: 600; max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selected-info .row { margin-top: 8px; }
 
@@ -427,7 +434,8 @@ input.mismatch { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger
   overflow: hidden;
 }
 .image-drop img { max-width: 340px; max-height: 220px; object-fit: contain; }
-.steppers label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.steppers { justify-content: flex-start; }
+.steppers label { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 14px; }
 .steppers input { width: 84px; }
 
 /* ============ 遊んでいる最中 ============ */

@@ -244,10 +244,11 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             <X size={18} />
           </button>
 
-          {/* 画像の修正画面（mode:'edit'）は左に画像・右に情報の2カラム。それ以外は上にプレビュー。 */}
-          {!(selection.kind === 'image' && selection.mode === 'edit') && (
+          {/* 画像を選んだとき（修正・作成のどちらも）は左に画像・右にコントロールの2カラム。
+              パズルを選んだときだけ、上にプレビュー（完成図／現在の様子）を出す。 */}
+          {selection.kind === 'puzzle' && (
             <div className="preview-row">
-              {selection.kind === 'puzzle' && selectedStatus === 'inProgress' ? (
+              {selectedStatus === 'inProgress' ? (
                 <>
                   <div className="preview-slot">
                     <span className="preview-caption">完成図</span>
@@ -338,30 +339,62 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             </div>
           )}
 
-          {/* 「この画像でパズルを作成する」を押したとき（mode:'create'）: 従来のピース数決定画面。 */}
+          {/* 「この画像でパズルを作成する」を押したとき（mode:'create'）: 左に画像・右にピース数決定。 */}
           {selection.kind === 'image' && selection.mode === 'create' && (
-            <div className="selected-info">
-              <div className="selected-name">{selection.image.display_name}</div>
-              <div className="row steppers">
-                <label>列 (横)
-                  <input type="number" min={2} max={40} value={columns} onChange={(e) => setColumns(clampGrid(e.target.valueAsNumber))} />
-                </label>
-                <label>行 (縦)
-                  <input type="number" min={2} max={40} value={rows} onChange={(e) => setRows(clampGrid(e.target.valueAsNumber))} />
-                </label>
-                <span className="muted">{columns * rows}ピース</span>
+            <div className="edit-layout">
+              <div className="edit-image">
+                <img src={selection.image.thumb_url} alt="" />
               </div>
-              <div className="row">
-                <button
-                  type="button"
-                  className="btn primary large"
-                  onClick={() => void createSelectedImage()}
-                  disabled={creating || pieceCountExists}
-                >
-                  {creating ? '作成中…' : 'このピース数でパズルを作成'}
-                </button>
+              <div className="edit-fields">
+                <div className="edit-item">
+                  <span className="edit-label">ファイル名</span>
+                  <span className="edit-filename">{selection.image.original_name}</span>
+                </div>
+                <div className="edit-item">
+                  <span className="edit-label">タイトル</span>
+                  <span>{selection.image.display_name}</span>
+                </div>
+                <div className="edit-item">
+                  <span className="edit-label">画像のサイズ</span>
+                  <span>{selection.image.width} x {selection.image.height}</span>
+                </div>
+                <div className="edit-item">
+                  <span className="edit-label">この画像で作成済みのパズル</span>
+                  {puzzlesForSelectedImage.length === 0 ? (
+                    <span className="muted">まだありません</span>
+                  ) : (
+                    <div className="grid-chips">
+                      {puzzlesForSelectedImage.map((p) => (
+                        <span
+                          key={p.id}
+                          className={`grid-chip${p.columns === columns && p.rows === rows ? ' current' : ''}`}
+                        >
+                          {p.columns} x {p.rows}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="row steppers">
+                  <label>列 (横)
+                    <input type="number" min={2} max={40} value={columns} onChange={(e) => setColumns(clampGrid(e.target.valueAsNumber))} />
+                  </label>
+                  <label>行 (縦)
+                    <input type="number" min={2} max={40} value={rows} onChange={(e) => setRows(clampGrid(e.target.valueAsNumber))} />
+                  </label>
+                  <span className="muted">{columns * rows}ピース</span>
+                </div>
+                <div className="row edit-buttons">
+                  <button
+                    type="button"
+                    className="btn primary large"
+                    onClick={() => void createSelectedImage()}
+                    disabled={creating || pieceCountExists}
+                  >
+                    {creating ? '作成中…' : 'このピース数でパズルを作成'}
+                  </button>
+                </div>
               </div>
-              {pieceCountExists && <div className="muted">このピース数のパズルはすでに作成されています。</div>}
             </div>
           )}
 
