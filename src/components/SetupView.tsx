@@ -323,7 +323,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 </div>
                 <div className="row edit-buttons">
                   <button type="button" className="btn primary large" onClick={goToCreate} disabled={savingName}>
-                    この画像でパズルを作成する
+                    パズル作成画面へ
                   </button>
                 </div>
                 {/* 作成済みパズルが無く、自分がアップロードした画像のときだけ削除できる
