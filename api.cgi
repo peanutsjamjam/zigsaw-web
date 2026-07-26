@@ -45,6 +45,7 @@ use File::Basename qw(dirname);
 #   GET    ?action=images                           -> アップロード画像一覧（未ログインでも可）
 #   POST   ?action=image  {display_name,width,height,ext,full,thumb}
 #                                                   -> 画像アップロード（要ログイン。full/thumb は base64）
+#   PUT    ?action=image&id=<id>  {display_name}    -> display_name を変更（本人または管理者）
 #   DELETE ?action=image&id=<id>                    -> 画像削除（本人または管理者。パズル/進行も CASCADE 削除）
 #   GET    ?action=puzzles                          -> 作成済みパズル一覧（誰でも。画像情報+作成者名つき）
 #   POST   ?action=puzzle {image_id,columns,rows}   -> パズルを作成（同じ画像+グリッドは1つに束ねる。要ログイン）
@@ -777,6 +778,28 @@ eval {
             undef, $u->{username}, $id
         );
         respond({ image => image_row_to_json(app_base_url(), $row) }, '201 Created');
+    }
+    elsif ($action eq 'image' && $method eq 'PUT') {
+        # 画像情報の変更。変更できるのは display_name のみ。本人か管理者のみ。
+        my $u = require_user($dbh);
+        my $id = int(query_param('id') || 0);
+        my $body = read_body_json();
+        my $display_name = defined $body->{display_name} ? $body->{display_name} : '';
+        $display_name =~ s/^\s+|\s+$//g;
+        fail('bad_request') if $display_name eq '';
+        $display_name = substr($display_name, 0, 200);
+        my $row = $dbh->selectrow_hashref('SELECT * FROM images WHERE id = ?', undef, $id);
+        fail('not_found', '404 Not Found') unless $row;
+        fail('forbidden', '403 Forbidden')
+            unless (defined $row->{owner_id} && $row->{owner_id} == $u->{id}) || pgbool($u->{is_admin}) == JSON::PP::true;
+        $dbh->do('UPDATE images SET display_name = ? WHERE id = ?', undef, $display_name, $id);
+        my $updated = $dbh->selectrow_hashref(
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height,
+                    ou.username AS owner_username, (i.owner_id = ?) AS mine
+               FROM images i LEFT JOIN users ou ON ou.id = i.owner_id WHERE i.id = ?',
+            undef, $u->{id}, $id
+        );
+        respond({ image => image_row_to_json(app_base_url(), $updated) });
     }
     elsif ($action eq 'image' && $method eq 'DELETE') {
         my $u = require_user($dbh);

@@ -29,9 +29,12 @@ type Props = {
   busy: boolean
 }
 
-// 選択中のもの。画像を選べばピース数を決めて作成、パズルを選べばプレイ/再開。
+// 選択中のもの。
+//   画像を選ぶと、まず画像情報の修正画面（mode:'edit'）を出し、そこから
+//   「この画像でパズルを作成する」で従来のピース数決定画面（mode:'create'）へ進む。
+//   パズルを選べばプレイ/再開。
 type Selection =
-  | { kind: 'image'; image: GalleryImage }
+  | { kind: 'image'; image: GalleryImage; mode: 'edit' | 'create' }
   | { kind: 'puzzle'; puzzle: Puzzle }
 
 export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, onLoggedOut, busy }: Props) {
@@ -50,6 +53,10 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [pending, setPending] = useState<{ file: File; url: string } | null>(null)
   const [pendingName, setPendingName] = useState('')
   const [confirmingRemoval, setConfirmingRemoval] = useState<GalleryImage | null>(null)
+  // 画像情報修正画面での display_name の編集値と、保存中フラグ・完了通知。
+  const [editName, setEditName] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameSavedNotice, setNameSavedNotice] = useState(false)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -78,16 +85,59 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     return map
   }, [progress])
 
-  const selectImage = (image: GalleryImage) => { setSelection({ kind: 'image', image }); setColumns(6); setRows(4) }
+  // 画像を選んだら、まず画像情報の修正画面（mode:'edit'）を出す。
+  const selectImage = (image: GalleryImage) => {
+    setSelection({ kind: 'image', image, mode: 'edit' })
+    setEditName(image.display_name)
+    setColumns(6)
+    setRows(4)
+    setError(null)
+  }
   const selectPuzzle = (puzzle: Puzzle) => setSelection({ kind: 'puzzle', puzzle })
 
-  // いま選んでいる画像で、すでに作成済みのパズルのピース数の組（"列x行"）。
-  // 画像を選んだ時点でブラウザ側に保持しておき、既存の組が選ばれているときは作成を止める。
-  const existingGridsForSelectedImage = useMemo(() => {
-    if (selection?.kind !== 'image') return new Set<string>()
+  // ログイン中の自分の画像（または管理者）のみ display_name を変更できる。
+  const canEditName = selection?.kind === 'image' && (selection.image.mine || account?.is_admin === true)
+
+  // 「OK」: display_name の変更を反映する。
+  const saveImageName = async () => {
+    if (selection?.kind !== 'image') return
+    const name = editName.trim()
+    if (name === '' || name === selection.image.display_name) return
+    setSavingName(true)
+    setError(null)
+    try {
+      const updated = await api.updateImage(selection.image.id, name)
+      setSelection({ kind: 'image', image: updated, mode: 'edit' })
+      await reload()   // 一覧・パズル名（画像名を参照）にも反映する
+      setNameSavedNotice(true)
+      window.setTimeout(() => setNameSavedNotice(false), 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingName(false)
+    }
+  }
+
+  // 「この画像でパズルを作成する」: 従来のピース数決定画面（mode:'create'）へ進む。
+  const goToCreate = () => {
+    if (selection?.kind !== 'image') return
+    setSelection({ kind: 'image', image: selection.image, mode: 'create' })
+    setError(null)
+  }
+
+  // いま選んでいる画像で、すでに作成済みのパズル（ピース数の少ない順）。
+  const puzzlesForSelectedImage = useMemo(() => {
+    if (selection?.kind !== 'image') return []
     const imageId = selection.image.id
-    return new Set(puzzles.filter((p) => p.image_id === imageId).map((p) => `${p.columns}x${p.rows}`))
+    return puzzles
+      .filter((p) => p.image_id === imageId)
+      .sort((a, b) => a.columns * a.rows - b.columns * b.rows)
   }, [puzzles, selection])
+  // 上のうちピース数の組（"列x行"）の集合。既存の組が選ばれているときは作成を止めるのに使う。
+  const existingGridsForSelectedImage = useMemo(
+    () => new Set(puzzlesForSelectedImage.map((p) => `${p.columns}x${p.rows}`)),
+    [puzzlesForSelectedImage],
+  )
   // 選択中のピース数のパズルがすでに存在するか。
   const pieceCountExists = existingGridsForSelectedImage.has(`${columns}x${rows}`)
 
@@ -194,28 +244,104 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             <X size={18} />
           </button>
 
-          <div className="preview-row">
-            {selection.kind === 'puzzle' && selectedStatus === 'inProgress' ? (
-              <>
-                <div className="preview-slot">
-                  <span className="preview-caption">完成図</span>
-                  <PreviewBox url={selection.puzzle.thumb_url} />
-                </div>
-                <div className="preview-slot">
-                  <span className="preview-caption">現在の様子</span>
-                  <PreviewBox url={selectedProgress?.state.snapshot} />
-                </div>
-              </>
-            ) : (
-              <PreviewBox url={previewUrl} />
-            )}
-          </div>
+          {/* 画像の修正画面（mode:'edit'）は左に画像・右に情報の2カラム。それ以外は上にプレビュー。 */}
+          {!(selection.kind === 'image' && selection.mode === 'edit') && (
+            <div className="preview-row">
+              {selection.kind === 'puzzle' && selectedStatus === 'inProgress' ? (
+                <>
+                  <div className="preview-slot">
+                    <span className="preview-caption">完成図</span>
+                    <PreviewBox url={selection.puzzle.thumb_url} />
+                  </div>
+                  <div className="preview-slot">
+                    <span className="preview-caption">現在の様子</span>
+                    <PreviewBox url={selectedProgress?.state.snapshot} />
+                  </div>
+                </>
+              ) : (
+                <PreviewBox url={previewUrl} />
+              )}
+            </div>
+          )}
 
-          {/* 選択パネル：画像ならピース数＋作成、パズルならプレイ/再開。 */}
-          {selection.kind === 'image' && (
+          {/* 画像を選んだとき（mode:'edit'）: 左に画像、右にファイル名・タイトル編集・サイズ・各ボタン。 */}
+          {selection.kind === 'image' && selection.mode === 'edit' && (
+            <div className="edit-layout">
+              <div className="edit-image">
+                <img src={selection.image.thumb_url} alt="" />
+              </div>
+              <div className="edit-fields">
+                <div className="edit-item">
+                  <span className="edit-label">ファイル名</span>
+                  <span className="edit-filename">{selection.image.original_name}</span>
+                </div>
+                <div className="edit-item">
+                  <span className="edit-label">タイトル</span>
+                  {canEditName ? (
+                    <textarea
+                      className="edit-title"
+                      value={editName}
+                      maxLength={200}
+                      rows={2}
+                      onChange={(e) => setEditName(e.target.value)}
+                    />
+                  ) : (
+                    <span>{selection.image.display_name}</span>
+                  )}
+                </div>
+                <div className="edit-item">
+                  <span className="edit-label">画像のサイズ</span>
+                  <span>{selection.image.width} x {selection.image.height}</span>
+                </div>
+                {nameSavedNotice && <div className="muted">変更しました。</div>}
+                {error && <div className="error">{error}</div>}
+                <div className="row edit-buttons">
+                  {canEditName && (
+                    <button
+                      type="button"
+                      className="btn primary"
+                      onClick={() => void saveImageName()}
+                      disabled={savingName || editName.trim() === '' || editName.trim() === selection.image.display_name}
+                    >
+                      {savingName ? '保存中…' : 'OK'}
+                    </button>
+                  )}
+                  <button type="button" className="btn" onClick={() => setSelection(null)} disabled={savingName}>キャンセル</button>
+                </div>
+                <div className="edit-item">
+                  <span className="edit-label">この画像で作成済みのパズル</span>
+                  {puzzlesForSelectedImage.length === 0 ? (
+                    <span className="muted">まだありません</span>
+                  ) : (
+                    <div className="grid-chips">
+                      {puzzlesForSelectedImage.map((p) => (
+                        <span key={p.id} className="grid-chip">{p.columns} x {p.rows}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="row edit-buttons">
+                  <button type="button" className="btn primary large" onClick={goToCreate} disabled={savingName}>
+                    この画像でパズルを作成する
+                  </button>
+                </div>
+                {/* 作成済みパズルが無く、自分がアップロードした画像のときだけ削除できる
+                    （パズルがあると連鎖削除になるため、0個のときに限る）。 */}
+                {selection.image.mine && puzzlesForSelectedImage.length === 0 && (
+                  <div className="row edit-buttons">
+                    <button type="button" className="btn danger" onClick={() => setConfirmingRemoval(selection.image)} disabled={savingName}>
+                      <Trash2 size={16} /> この画像を削除する
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 「この画像でパズルを作成する」を押したとき（mode:'create'）: 従来のピース数決定画面。 */}
+          {selection.kind === 'image' && selection.mode === 'create' && (
             <div className="selected-info">
               <div className="selected-name">{selection.image.display_name}</div>
-              {selection.image.owner && <div className="muted">投稿: {selection.image.owner}</div>}
               <div className="row steppers">
                 <label>列 (横)
                   <input type="number" min={2} max={40} value={columns} onChange={(e) => setColumns(clampGrid(e.target.valueAsNumber))} />
@@ -234,11 +360,6 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 >
                   {creating ? '作成中…' : 'このピース数でパズルを作成'}
                 </button>
-                {selection.image.mine && (
-                  <button type="button" className="btn large" onClick={() => setConfirmingRemoval(selection.image)} disabled={creating}>
-                    <Trash2 size={16} /> 画像を削除
-                  </button>
-                )}
               </div>
               {pieceCountExists && <div className="muted">このピース数のパズルはすでに作成されています。</div>}
             </div>
@@ -339,8 +460,10 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       {confirmingRemoval && (
         <div className="overlay dim">
           <div className="panel">
-            <h2>「{confirmingRemoval.display_name}」を削除しますか？</h2>
-            <p className="muted">この画像と、この画像から作られたパズル・その途中経過もすべて消えます。この操作は取り消せません。</p>
+            <h2>この画像を削除しますか？</h2>
+            <p className="muted">
+              「{confirmingRemoval.display_name}」をギャラリーから削除します。この操作は取り消せません。
+            </p>
             <div className="row">
               <button
                 type="button" className="btn danger"

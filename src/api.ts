@@ -174,6 +174,8 @@ export const api = {
   images: () => request<{ images: GalleryImage[] }>('?action=images').then((r) => r.images),
   uploadImage: (payload: { display_name: string; ext: string; width: number; height: number; full: string; thumb: string }) =>
     postJson<{ image: GalleryImage }>('?action=image', payload).then((r) => r.image),
+  updateImage: (id: number, display_name: string) =>
+    request<{ image: GalleryImage }>(`?action=image&id=${id}`, { method: 'PUT', body: JSON.stringify({ display_name }) }).then((r) => r.image),
   deleteImage: (id: number) => request<{ ok: true }>(`?action=image&id=${id}`, { method: 'DELETE' }),
 
   puzzles: () => request<{ puzzles: Puzzle[] }>('?action=puzzles').then((r) => r.puzzles),
