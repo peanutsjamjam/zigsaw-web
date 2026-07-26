@@ -254,19 +254,29 @@
     linear-gradient(to bottom, #fff 0 1px, transparent 1px);
 }
 
-/* パズル選択時の左カラム: タブ＋画像 */
-.puzzle-image { display: flex; flex-direction: column; gap: 8px; align-self: flex-start; }
-.image-tabs { display: flex; gap: 6px; }
+/* パズル選択時の左カラム: タブ＋画像。タブと画像・タブ同士に隙間を作らず、
+   選択中タブは下ふちを消して画像エリアと繋げる（タブらしい見た目にする）。 */
+.puzzle-image { display: flex; flex-direction: column; align-items: flex-start; align-self: flex-start; }
+/* タブがあるときは、下の画像の上ふちにタブが乗るように角丸を落とす。 */
+.puzzle-image.has-tabs .edit-image img { border-top-left-radius: 0; border-top-right-radius: 0; }
+
+.image-tabs { display: flex; position: relative; z-index: 1; margin-bottom: -1px; }
 .image-tabs button {
-  flex: 1;
-  padding: 6px 12px;
-  font-size: 13px;
+  padding: 8px 20px;
+  font-size: 15px;
   color: var(--muted);
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 8px 8px 0 0;   /* 上だけ角丸 */
 }
-.image-tabs button.active { background: var(--accent); color: #fff; border-color: transparent; }
+/* 隣り合うタブのふちを重ねて、隙間・二重線をなくす。 */
+.image-tabs button + button { margin-left: -1px; }
+.image-tabs button.active {
+  background: var(--panel);
+  color: var(--text);
+  border-bottom-color: var(--panel);   /* 下ふちを画像エリアの上ふちに重ねて隠す */
+  z-index: 1;
+}
 /* 現在の様子がまだ保存されていないときの表示（画像の代わり） */
 .no-snapshot {
   width: 640px;

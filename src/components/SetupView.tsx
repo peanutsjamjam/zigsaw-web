@@ -395,7 +395,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             const showCurrent = showTabs && puzzleTab === 'current'
             return (
               <div className="edit-layout">
-                <div className="puzzle-image">
+                <div className={`puzzle-image${showTabs ? ' has-tabs' : ''}`}>
                   {showTabs && (
                     <div className="image-tabs">
                       <button type="button" className={puzzleTab === 'finished' ? 'active' : ''} onClick={() => setPuzzleTab('finished')}>完成図</button>
