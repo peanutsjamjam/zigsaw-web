@@ -20,6 +20,7 @@ export type GalleryImage = {
   width: number
   height: number
   owner: string | null   // 投稿者名。管理者が置いた画像は null
+  upload_ip: string | null   // アップロード元 IP。不明なら null
   created_at: string     // 投稿日時
   mine: boolean          // ログイン中の自分がアップロードした画像か
   full_url: string       // 遊ぶ用の（縮小済み）画像

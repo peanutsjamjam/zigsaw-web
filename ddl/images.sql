@@ -15,6 +15,7 @@ CREATE TABLE images (
   original_name TEXT NOT NULL,          -- アップロード時の元の名前（当初は display_name と同じ）
   width        INTEGER NOT NULL,
   height       INTEGER NOT NULL,
+  upload_ip    INET,                    -- アップロード元の IP（管理者設置は NULL）
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

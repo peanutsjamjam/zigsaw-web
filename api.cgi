@@ -441,6 +441,7 @@ sub image_row_to_json {
         width         => 0 + $row->{width},
         height        => 0 + $row->{height},
         owner         => $row->{owner_username},   # 投稿者名（管理者設置は null）
+        upload_ip     => $row->{upload_ip},         # アップロード元 IP（不明なら null）
         created_at    => $row->{created_at},        # 投稿日時
         mine          => $row->{mine} ? JSON::PP::true : JSON::PP::false,
         full_url      => "${base_url}images/full/$row->{basename}.$row->{ext}",
@@ -785,7 +786,7 @@ eval {
         my $base = app_base_url();
 
         my $img_rows = $dbh->selectall_arrayref(
-            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at,
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at, host(i.upload_ip) AS upload_ip,
                     ou.username AS owner_username, false AS mine
                FROM images i LEFT JOIN users ou ON ou.id = i.owner_id
               WHERE i.owner_id = ? ORDER BY i.created_at DESC, i.id DESC',
@@ -832,7 +833,7 @@ eval {
         my $u = current_user($dbh);
         my $uid = $u ? $u->{id} : -1;
         my $rows = $dbh->selectall_arrayref(
-            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at,
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at, host(i.upload_ip) AS upload_ip,
                     ou.username AS owner_username,
                     (i.owner_id = ?) AS mine
                FROM images i
@@ -884,14 +885,17 @@ eval {
             fail('image_write_failed', '500 Internal Server Error');
         };
 
-        # display_name＝タイトル（編集可）、original_name＝ファイル名（変更不可）。
+        # display_name＝タイトル（編集可）、original_name＝ファイル名（変更不可）、
+        # upload_ip＝アップロード元 IP（REMOTE_ADDR。空なら NULL）。
+        my $upload_ip = $ENV{REMOTE_ADDR};
+        $upload_ip = undef if !defined $upload_ip || $upload_ip eq '';
         my $id = $dbh->selectrow_array(
-            'INSERT INTO images (owner_id, basename, ext, display_name, original_name, width, height)
-             VALUES (?,?,?,?,?,?,?) RETURNING id',
-            undef, $u->{id}, $basename, $ext, $display_name, $original_name, $width, $height
+            'INSERT INTO images (owner_id, basename, ext, display_name, original_name, width, height, upload_ip)
+             VALUES (?,?,?,?,?,?,?,?) RETURNING id',
+            undef, $u->{id}, $basename, $ext, $display_name, $original_name, $width, $height, $upload_ip
         );
         my $row = $dbh->selectrow_hashref(
-            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at,
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at, host(i.upload_ip) AS upload_ip,
                     ?::text AS owner_username, true AS mine
                FROM images i WHERE i.id = ?',
             undef, $u->{username}, $id
@@ -913,7 +917,7 @@ eval {
             unless (defined $row->{owner_id} && $row->{owner_id} == $u->{id}) || pgbool($u->{is_admin}) == JSON::PP::true;
         $dbh->do('UPDATE images SET display_name = ? WHERE id = ?', undef, $display_name, $id);
         my $updated = $dbh->selectrow_hashref(
-            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at,
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at, host(i.upload_ip) AS upload_ip,
                     ou.username AS owner_username, (i.owner_id = ?) AS mine
                FROM images i LEFT JOIN users ou ON ou.id = i.owner_id WHERE i.id = ?',
             undef, $u->{id}, $id

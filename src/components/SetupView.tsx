@@ -285,8 +285,11 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                   <span>{selection.image.width} x {selection.image.height}</span>
                 </div>
                 <div className="edit-item">
-                  <span className="edit-label">投稿者</span>
-                  <span>{selection.image.owner ?? '（管理者設置）'}</span>
+                  <span className="edit-label">投稿者（投稿元）</span>
+                  <span>
+                    {selection.image.owner ?? '（管理者設置）'}
+                    {selection.image.upload_ip && `（${selection.image.upload_ip}）`}
+                  </span>
                 </div>
                 <div className="edit-item">
                   <span className="edit-label">投稿日時</span>
