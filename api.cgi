@@ -51,7 +51,9 @@ use File::Basename qw(dirname);
 #   GET    ?action=puzzles                          -> 作成済みパズル一覧（誰でも。画像情報+作成者名つき）
 #   POST   ?action=puzzle {image_id,columns,rows}   -> パズルを作成（同じ画像+グリッドは1つに束ねる。要ログイン）
 #   DELETE ?action=puzzle&id=<id>                   -> パズル削除（作成者/管理者。プレイ中の人がいると 409）
-#   GET    ?action=progress                         -> 自分の途中経過一覧（要ログイン。パズル+画像情報つき）
+#   GET    ?action=progress                         -> 自分の途中経過一覧（要ログイン。パズル+画像情報つき。
+#                                                      一覧では重い snapshot は省く）
+#   GET    ?action=progress_snapshot&id=<id>        -> その途中経過の「現在の様子」snapshot だけを返す（要ログイン）
 #   PUT    ?action=progress {puzzle_id,state}       -> 途中経過を保存（upsert。要ログイン）
 #   DELETE ?action=progress&id=<id>                 -> 途中経過を削除（要ログイン）
 
@@ -1020,16 +1022,31 @@ eval {
         my $base = app_base_url();
         my @out;
         for my $r (@$rows) {
+            my $state = eval { $JSON->decode($r->{state}) } || {};   # JSONB は文字列で来る
+            # 一覧では重い「現在の様子」スナップショット（数十KB/件）を省く。
+            # 詳細を開いたときに ?action=progress_snapshot で個別取得する。
+            delete $state->{snapshot};
             push @out, {
                 id         => 0 + $r->{id},
                 puzzle_id  => 0 + $r->{puzzle_id},
-                state      => (eval { $JSON->decode($r->{state}) } || {}),   # JSONB は文字列で来る
+                state      => $state,
                 updated_at => $r->{updated_at},
                 # $r->{id} は progress 行の id なので、パズルの id（=puzzle_id）で上書きして渡す。
                 puzzle     => puzzle_row_to_json($base, { %$r, id => $r->{puzzle_id} }),
             };
         }
         respond({ progress => \@out });
+    }
+    elsif ($action eq 'progress_snapshot' && $method eq 'GET') {
+        # 「現在の様子」スナップショット（data URL）を1件だけ返す。一覧では省いているので、
+        # 詳細を開いたときにここで取得する。自分の progress のみ。無ければ snapshot=null。
+        my $u = require_user($dbh);
+        my $id = int(query_param('id') || 0);
+        my $snap = $dbh->selectrow_array(
+            "SELECT state->>'snapshot' FROM progress WHERE id = ? AND user_id = ?",
+            undef, $id, $u->{id}
+        );
+        respond({ snapshot => (defined $snap && $snap ne '') ? $snap : undef });
     }
     elsif ($action eq 'progress' && $method eq 'PUT') {
         my $u = require_user($dbh);

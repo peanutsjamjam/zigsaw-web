@@ -107,7 +107,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
               <DetailSection title="画像" count={detail.images.length} empty="登録した画像はありません。">
                 {detail.images.map((img) => (
                   <div key={img.id} className="card">
-                    <div className="card-thumb"><img src={img.thumb_url} alt="" /></div>
+                    <div className="card-thumb"><img src={img.thumb_url} alt="" loading="lazy" /></div>
                     <div className="card-name">{img.display_name}</div>
                   </div>
                 ))}
@@ -116,7 +116,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
               <DetailSection title="パズル" count={detail.puzzles.length} empty="作成したパズルはありません。">
                 {detail.puzzles.map((p) => (
                   <div key={p.id} className="card">
-                    <div className="card-thumb"><img src={p.thumb_url} alt="" /></div>
+                    <div className="card-thumb"><img src={p.thumb_url} alt="" loading="lazy" /></div>
                     <div className="card-name">{p.display_name}</div>
                     <div className="muted card-owner">{p.columns} x {p.rows}（{p.columns * p.rows}ピース）</div>
                   </div>
@@ -128,7 +128,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
                   const status = statusFromState(item.state, item.puzzle.columns, item.puzzle.rows)
                   return (
                     <div key={item.id} className="card">
-                      <div className="card-thumb"><img src={item.state.snapshot ?? item.puzzle.thumb_url} alt="" /></div>
+                      <div className="card-thumb"><img src={item.state.snapshot ?? item.puzzle.thumb_url} alt="" loading="lazy" /></div>
                       <div className="card-name">{item.puzzle.display_name}</div>
                       <div className="muted card-owner">{item.puzzle.columns} x {item.puzzle.rows}</div>
                       <div className={`status ${status}`}>{STATUS_TEXT[status]}</div>

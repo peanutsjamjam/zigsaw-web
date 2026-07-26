@@ -193,6 +193,9 @@ export const api = {
   deletePuzzle: (id: number) => request<{ ok: true }>(`?action=puzzle&id=${id}`, { method: 'DELETE' }),
 
   progress: () => request<{ progress: ProgressItem[] }>('?action=progress').then((r) => r.progress),
+  // 「現在の様子」スナップショットを1件だけ取得する（一覧は snapshot を含まないため、詳細で使う）。
+  progressSnapshot: (id: number) =>
+    request<{ snapshot: string | null }>(`?action=progress_snapshot&id=${id}`).then((r) => r.snapshot),
   saveProgress: (puzzle_id: number, state: SavedProgress) =>
     request<{ id: number }>('?action=progress', { method: 'PUT', body: JSON.stringify({ puzzle_id, state }) }),
   deleteProgress: (id: number) => request<{ ok: true }>(`?action=progress&id=${id}`, { method: 'DELETE' }),

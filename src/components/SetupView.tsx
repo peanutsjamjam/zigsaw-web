@@ -62,6 +62,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
   // プレイ中パズルの画像エリアのタブ（完成図 / 現在の様子）。既定は「現在の様子」。
   const [puzzleTab, setPuzzleTab] = useState<'finished' | 'current'>('current')
+  // 「現在の様子」スナップショットは一覧に含まれないので、詳細を開いたとき progress id ごとに
+  // 個別取得してここにキャッシュする。値 undefined=未取得, null=保存なし, string=data URL。
+  const [snapshotById, setSnapshotById] = useState<Record<number, string | null>>({})
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -74,6 +77,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       setImages(imgs)
       setPuzzles(puz)
       setProgress(prog)
+      setSnapshotById({})   // progress を読み直したら snapshot キャッシュは破棄する
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -153,6 +157,20 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const selectedStatus: PuzzleStatus = selection?.kind === 'puzzle'
     ? statusFromState(selectedProgress?.state, selection.puzzle.columns, selection.puzzle.rows)
     : 'notStarted'
+
+  // 「現在の様子」タブを表示していて、まだ snapshot を取得していなければ個別に取得する。
+  const currentSnapshotId =
+    selection?.kind === 'puzzle' && selection.mode === 'play'
+    && puzzleTab === 'current' && selectedStatus === 'inProgress' && selectedProgress
+      ? selectedProgress.id : null
+  useEffect(() => {
+    if (currentSnapshotId == null || snapshotById[currentSnapshotId] !== undefined) return
+    let cancelled = false
+    api.progressSnapshot(currentSnapshotId)
+      .then((snap) => { if (!cancelled) setSnapshotById((m) => ({ ...m, [currentSnapshotId]: snap })) })
+      .catch(() => { if (!cancelled) setSnapshotById((m) => ({ ...m, [currentSnapshotId]: null })) })
+    return () => { cancelled = true }
+  }, [currentSnapshotId, snapshotById])
 
   const playSelectedPuzzle = () => {
     if (selection?.kind !== 'puzzle') return
@@ -415,7 +433,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           {selection.kind === 'puzzle' && selection.mode === 'play' && (() => {
             // プレイ中なら（スナップショット画像の有無に関わらず）必ずタブを出す。
             const showTabs = selectedStatus === 'inProgress'
-            const snapshotUrl = selectedProgress?.state.snapshot
+            // snapshot は一覧に含まれないので、詳細で個別取得したキャッシュを見る。
+            // undefined=取得中, null=保存なし, string=data URL。
+            const snap = selectedProgress ? snapshotById[selectedProgress.id] : undefined
             const showCurrent = showTabs && puzzleTab === 'current'
             return (
               <div className="edit-layout">
@@ -428,9 +448,11 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                   )}
                   <div className="edit-image">
                     {showCurrent
-                      ? (snapshotUrl
-                          ? <img src={snapshotUrl} alt="" />
-                          : <div className="no-snapshot muted">現在の様子はまだ保存されていません</div>)
+                      ? (snap === undefined
+                          ? <div className="no-snapshot muted">読み込み中…</div>
+                          : snap
+                            ? <img src={snap} alt="" />
+                            : <div className="no-snapshot muted">現在の様子はまだ保存されていません</div>)
                       : <img src={selection.puzzle.thumb_url} alt="" />}
                   </div>
                 </div>
@@ -554,7 +576,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 className={`card${selection?.kind === 'image' && selection.image.id === image.id ? ' selected' : ''}`}
                 onClick={() => selectImage(image)}
               >
-                <div className="card-thumb"><img src={image.thumb_url} alt="" /></div>
+                <div className="card-thumb"><img src={image.thumb_url} alt="" loading="lazy" /></div>
                 <div className="card-name">{image.display_name}</div>
                 {image.owner && <div className="muted card-owner">{image.owner}</div>}
               </button>
@@ -575,7 +597,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
               className={`card${selection?.kind === 'puzzle' && selection.puzzle.id === puzzle.id ? ' selected' : ''}`}
               onClick={() => selectPuzzleForEdit(puzzle)}
             >
-              <div className="card-thumb"><img src={puzzle.thumb_url} alt="" /></div>
+              <div className="card-thumb"><img src={puzzle.thumb_url} alt="" loading="lazy" /></div>
               <div className="card-name">{puzzle.display_name}</div>
               <div className="muted card-owner">{puzzle.columns} x {puzzle.rows}（{puzzle.columns * puzzle.rows}ピース）</div>
               {account && badgeFor(progressByPuzzle.get(puzzle.id), puzzle)}
@@ -597,7 +619,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                   className={`card${selection?.kind === 'puzzle' && selection.puzzle.id === item.puzzle_id ? ' selected' : ''}`}
                   onClick={() => selectPuzzleForPlay(item.puzzle)}
                 >
-                  <div className="card-thumb"><img src={item.puzzle.thumb_url} alt="" /></div>
+                  <div className="card-thumb"><img src={item.puzzle.thumb_url} alt="" loading="lazy" /></div>
                   <div className="card-name">{item.puzzle.display_name}</div>
                   <div className="muted card-owner">{item.puzzle.columns} x {item.puzzle.rows}（{item.puzzle.columns * item.puzzle.rows}ピース）</div>
                   <div className={`status ${status}`}>{STATUS_TEXT[status]}</div>
