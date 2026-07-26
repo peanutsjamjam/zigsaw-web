@@ -128,6 +128,18 @@
 .dev-detail { display: flex; flex-direction: column; gap: 16px; margin-top: 8px; }
 .dev-subtitle { margin: 4px 0; font-size: 16px; }
 
+/* 画像ディレクトリの使用状況（統計タイル） */
+.stat-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.stat {
+  min-width: 140px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.stat-label { font-size: 12px; color: var(--muted); }
+.stat-value { font-size: 20px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+
 .setup-title {
   grid-column: 2;
   margin: 0;

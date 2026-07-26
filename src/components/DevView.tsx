@@ -4,10 +4,11 @@
 // 画像・作成したパズル・保存したゲームをカードで表示する。
 import { useEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
-import { api, type DevUser, type DevUserDetail } from '../api'
+import { api, type DevStorage, type DevUser, type DevUserDetail } from '../api'
 import { statusFromState, STATUS_TEXT } from '../lib/status'
 
 export function DevView({ onBack }: { onBack: () => void }) {
+  const [storage, setStorage] = useState<DevStorage | null>(null)
   const [users, setUsers] = useState<DevUser[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -15,6 +16,7 @@ export function DevView({ onBack }: { onBack: () => void }) {
   const [detailError, setDetailError] = useState<string | null>(null)
 
   useEffect(() => {
+    api.devStorage().then(setStorage).catch(() => { /* 取得失敗時は非表示のまま */ })
     api.devUsers().then(setUsers).catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [])
 
@@ -38,6 +40,18 @@ export function DevView({ onBack }: { onBack: () => void }) {
         <h1>開発メニュー</h1>
         <span className="muted">開発環境専用</span>
       </div>
+
+      <h2 className="section-title">画像ディレクトリの使用状況</h2>
+      {storage === null ? (
+        <div className="muted">読み込み中…</div>
+      ) : (
+        <div className="stat-row">
+          <Stat label="画像数" value={`${storage.image_count}`} />
+          <Stat label="画像の合計サイズ" value={formatBytes(storage.total_bytes)} />
+          <Stat label="空き容量" value={formatBytes(storage.fs_free)} />
+          <Stat label="総容量" value={`${formatBytes(storage.fs_total)}${storage.fs_type ? `（${storage.fs_type}）` : ''}`} />
+        </div>
+      )}
 
       <h2 className="section-title">ユーザー一覧（users）</h2>
       {error ? (
@@ -124,6 +138,15 @@ export function DevView({ onBack }: { onBack: () => void }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
     </div>
   )
 }

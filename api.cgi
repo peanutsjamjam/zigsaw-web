@@ -39,6 +39,7 @@ use File::Basename qw(dirname);
 #   DELETE ?action=account                          -> アカウント削除（progress は CASCADE 削除、
 #                                                      アップロード画像は owner_id が NULL になり残る）
 #   GET    ?action=me                               -> {username,email,is_admin} or 401
+#   GET    ?action=dev_storage                      -> 画像ディレクトリの画像数/合計サイズ・FSの空き/総容量（開発環境のみ）
 #   GET    ?action=dev_users                        -> 全ユーザー一覧（開発環境のみ。本番は404。salt/iterations は返さない）
 #   GET    ?action=dev_user_detail&id=<uid>         -> 指定ユーザーの画像/パズル/保存ゲーム（開発環境のみ）
 #   GET    ?action=images                           -> アップロード画像一覧（未ログインでも可）
@@ -592,6 +593,44 @@ eval {
     elsif ($action eq 'me' && $method eq 'GET') {
         my $u = require_user($dbh);
         respond({ username => $u->{username}, email => $u->{email}, is_admin => pgbool($u->{is_admin}) });
+    }
+    elsif ($action eq 'dev_storage' && $method eq 'GET') {
+        # 開発用: 画像ディレクトリのファイル数・合計サイズと、それが載っている
+        # ファイルシステムの総容量・空き容量。開発環境でのみ有効。
+        fail('not_found', '404 Not Found') unless $ZIGSAW_ENV eq 'development';
+
+        # 画像数は full/ のファイル数（画像1枚につき full が1つ）。
+        # 合計サイズは images ディレクトリ全体（full/thumb/incoming）の実ファイルの総和。
+        my $image_count = 0;
+        my $total_bytes = 0;
+        for my $sub (qw(full thumb incoming)) {
+            my $dir = "$IMAGE_DIR/$sub";
+            opendir(my $dh, $dir) or next;
+            while (defined(my $name = readdir $dh)) {
+                next if $name eq '.' || $name eq '..';
+                my $path = "$dir/$name";
+                next unless -f $path;
+                $image_count++ if $sub eq 'full';
+                $total_bytes += (stat($path))[7];
+            }
+            closedir $dh;
+        }
+
+        # df -TP -B1 <images> の2行目: Filesystem Type 総bytes 使用 空き 容量% マウント位置
+        my ($fs_type, $fs_total, $fs_free) = ('', 0, 0);
+        my @lines = split /\n/, (`df -TP -B1 '$IMAGE_DIR' 2>/dev/null` || '');
+        if (@lines >= 2) {
+            my @f = split /\s+/, $lines[1];
+            if (@f >= 5) { $fs_type = $f[1]; $fs_total = 0 + $f[2]; $fs_free = 0 + $f[4]; }
+        }
+
+        respond({
+            image_count => $image_count,
+            total_bytes => $total_bytes,
+            fs_type     => $fs_type,
+            fs_total    => $fs_total,
+            fs_free     => $fs_free,
+        });
     }
     elsif ($action eq 'dev_users' && $method eq 'GET') {
         # 開発用: 全ユーザーの一覧。開発環境でのみ有効（本番では 404 扱い）。

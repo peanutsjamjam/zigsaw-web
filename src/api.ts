@@ -60,6 +60,15 @@ export type DevUserDetail = {
   progress: ProgressItem[]
 }
 
+// 開発用: 画像ディレクトリの使用状況（dev_storage が返す）。
+export type DevStorage = {
+  image_count: number   // full/ 内のファイル数（＝画像数）
+  total_bytes: number   // images ディレクトリ全体（full/thumb/incoming）の合計サイズ
+  fs_type: string       // ファイルシステムの種類（例 ext4）
+  fs_total: number      // ファイルシステムの総容量（バイト）
+  fs_free: number       // ファイルシステムの空き容量（バイト）
+}
+
 // 途中経過として保存する状態。ゲーム本体の SavedGameState に、一覧の「現在の様子」に
 // 出すためのスナップショット画像（data URL）を足したもの。snapshot はゲーム進行には使わない。
 export type SavedProgress = SavedGameState & { snapshot?: string }
@@ -142,6 +151,7 @@ export const api = {
   env: () => request<{ env: string }>('?action=env'),
 
   me: () => request<Account>('?action=me'),
+  devStorage: () => request<DevStorage>('?action=dev_storage'),
   devUsers: () => request<{ users: DevUser[] }>('?action=dev_users').then((r) => r.users),
   devUserDetail: (id: number) => request<DevUserDetail>(`?action=dev_user_detail&id=${id}`),
   login: (email: string, password: string) => postJson<Account>('?action=login', { email, password }),
