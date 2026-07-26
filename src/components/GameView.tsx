@@ -58,10 +58,11 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
   }, [game.isComplete, canSave, save])
 
   const requestExit = useCallback(() => {
-    // 完成済み、または保存できない（＝失うものが無い）ときは、そのまま戻る。
-    if (game.isComplete || !canSave) { onExit(); return }
+    // 完成済みは失うものが無いのでそのまま戻る。
+    // それ以外は、ログイン中なら保存/破棄を、未ログインなら「失われます」の注意を出す。
+    if (game.isComplete) { onExit(); return }
     setConfirmingExit(true)
-  }, [game.isComplete, canSave, onExit])
+  }, [game.isComplete, onExit])
 
   const isViewingSolution = game.isViewingSolution
   const isBlurred = game.isPaused || isViewingSolution
@@ -122,13 +123,29 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
       {confirmingExit && (
         <div className="overlay dim">
           <div className="panel">
-            <h2>進行中のパズルがあります</h2>
-            <p className="muted">選択画面に戻る前に保存しますか？保存しない場合、この進行状況は失われます。</p>
-            <div className="row">
-              <button type="button" className="btn primary" onClick={() => { void save().then(onExit) }}>保存して戻る</button>
-              <button type="button" className="btn" onClick={onExit}>保存せず戻る</button>
-              <button type="button" className="btn" onClick={() => setConfirmingExit(false)}>キャンセル</button>
-            </div>
+            {canSave ? (
+              <>
+                <h2>進行中のパズルがあります</h2>
+                <p className="muted">選択画面に戻る前に保存しますか？保存しない場合、この進行状況は失われます。</p>
+                <div className="row">
+                  <button type="button" className="btn primary" onClick={() => { void save().then(onExit) }}>保存して戻る</button>
+                  <button type="button" className="btn" onClick={onExit}>保存せず戻る</button>
+                  <button type="button" className="btn" onClick={() => setConfirmingExit(false)}>キャンセル</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2>ログインしていません</h2>
+                <p className="muted">
+                  ログインしていないため、現在のパズルの状態は保存されません。
+                  選択画面に戻ると、この進行状況は失われます。それでも戻りますか？
+                </p>
+                <div className="row">
+                  <button type="button" className="btn danger" onClick={onExit}>戻る（保存しない）</button>
+                  <button type="button" className="btn" onClick={() => setConfirmingExit(false)}>キャンセル</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
