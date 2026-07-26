@@ -342,8 +342,19 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           {/* 「この画像でパズルを作成する」を押したとき（mode:'create'）: 左に画像・右にピース数決定。 */}
           {selection.kind === 'image' && selection.mode === 'create' && (
             <div className="edit-layout">
-              <div className="edit-image">
+              {/* 画像の上に、選んだ列×行のぶんだけ分割線を重ねて、どう切り分けられるかを示す。 */}
+              <div
+                className="piece-grid"
+                style={{
+                  width: `min(640px, calc(60vh * ${selection.image.width} / ${selection.image.height}))`,
+                  aspectRatio: `${selection.image.width} / ${selection.image.height}`,
+                }}
+              >
                 <img src={selection.image.thumb_url} alt="" />
+                <div
+                  className="piece-grid-lines"
+                  style={{ backgroundSize: `calc(100% / ${columns}) calc(100% / ${rows})` }}
+                />
               </div>
               <div className="edit-fields">
                 <div className="edit-item">
