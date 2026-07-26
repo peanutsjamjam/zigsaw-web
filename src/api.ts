@@ -103,6 +103,7 @@ const MESSAGES: Record<string, string> = {
   password_too_short: 'パスワードは4文字以上にしてください。',
   password_too_long: 'パスワードが長すぎます（128文字まで）。',
   invalid_credentials: 'メールアドレスまたはパスワードが違います。',
+  too_many_attempts: 'ログインの試行回数が多すぎます。しばらくしてからもう一度お試しください。',
   current_password_wrong: '現在のパスワードが違います。',
   signup_token_invalid: 'この登録用リンクは無効か、期限切れです。',
   reset_token_invalid: 'この再設定用リンクは無効か、期限切れです。',

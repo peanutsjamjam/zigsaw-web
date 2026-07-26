@@ -12,7 +12,7 @@ use File::Basename qw(dirname);
 #
 # 配信:  Apache UserDir 配下、suexec で sugawara として実行される。
 #        そのため PostgreSQL へは peer 認証（パスワード不要）で接続できる。
-# DB:    zigsaw（users / sessions / signup_tokens / reset_tokens / access_log / images / puzzles / progress）。
+# DB:    zigsaw（users / sessions / signup_tokens / reset_tokens / access_log / rate_events / images / puzzles / progress）。
 #        定義は ddl/*.sql 参照。
 # 認証:  ログイン時にランダムトークンを sessions に保存し、HttpOnly Cookie
 #        (zigsaw_sid) で受け渡す。パスワードは PBKDF2-HMAC-SHA256 で保存。
@@ -68,6 +68,17 @@ my $RESET_TOKEN_HOURS  = 1;
 my $MAIL_FROM    = 'zigsaw@peanutsjamjam.jp';
 # アップロード画像の最大バイト数（full/thumb それぞれの、デコード後のサイズ）。
 my $MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+# ---- レート制限のしきい値（rate_events テーブルで直近件数を数える） --------
+# login: 直近 $LOGIN_WINDOW_MIN 分の失敗が、同一メール/同一IPでこの回数以上なら一時的に拒否。
+my $LOGIN_WINDOW_MIN    = 15;
+my $LOGIN_MAX_PER_EMAIL = 5;
+my $LOGIN_MAX_PER_IP    = 20;
+# signup/reset のメール送信: 直近 $MAIL_WINDOW_MIN 分に、同一宛先/同一IPでこの通数以上なら送らない
+# （応答は存在秘匿・スロットル秘匿のため通常どおり {ok}）。
+my $MAIL_WINDOW_MIN     = 60;
+my $MAIL_MAX_PER_EMAIL  = 3;
+my $MAIL_MAX_PER_IP     = 10;
 
 # 実行環境名。api.cgi と同じディレクトリの env.pl（git 管理外。dev/本番で内容が異なる）を
 # require し、その中で $main::ZIGSAW_ENV を設定する。未設置なら 'unknown'。
@@ -210,6 +221,34 @@ sub log_access {
     return unless defined $ip && $ip ne '';
     eval { $dbh->do('INSERT INTO access_log (user_id, ip_addr) VALUES (?, ?)', undef, $user_id, $ip); 1 }
         or warn "log_access failed: $@\n";
+}
+
+# ---- レート制限 ------------------------------------------------------------
+# 直近 $minutes 分の (action, subject) 件数を数える。
+sub rate_count {
+    my ($dbh, $action, $subject, $minutes) = @_;
+    my ($n) = $dbh->selectrow_array(
+        'SELECT count(*) FROM rate_events
+          WHERE action = ? AND subject = ? AND created_at > now() - make_interval(mins => ?)',
+        undef, $action, $subject, $minutes
+    );
+    return $n || 0;
+}
+sub rate_add {
+    my ($dbh, $action, $subject) = @_;
+    eval { $dbh->do('INSERT INTO rate_events (action, subject) VALUES (?, ?)', undef, $action, $subject); 1 }
+        or warn "rate_add failed: $@\n";
+}
+sub rate_clear {
+    my ($dbh, $action, $subject) = @_;
+    eval { $dbh->do('DELETE FROM rate_events WHERE action = ? AND subject = ?', undef, $action, $subject); 1 }
+        or warn "rate_clear failed: $@\n";
+}
+# 古いレートイベントを掃除する（ついで掃除）。
+sub purge_old_rate_events {
+    my ($dbh) = @_;
+    eval { $dbh->do("DELETE FROM rate_events WHERE created_at < now() - interval '1 day'"); 1 }
+        or warn "purge_old_rate_events failed: $@\n";
 }
 
 # ---- セッション ------------------------------------------------------------
@@ -444,6 +483,18 @@ eval {
         $email =~ s/^\s+|\s+$//g;
         fail('email_required') if $email eq '';
         fail('email_invalid')  if length($email) > 254 || $email !~ /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+        # メール爆撃対策: 直近の送信が宛先/IP ごとに多すぎるときは送らない。存在秘匿・スロットル
+        # 秘匿のため応答は常に {ok}。しきい値内なら1通ぶんを記録してから送る。
+        my $ip = $ENV{REMOTE_ADDR} // '';
+        if (rate_count($dbh, 'mail_signup', 'email:' . lc($email), $MAIL_WINDOW_MIN) >= $MAIL_MAX_PER_EMAIL
+            || ($ip ne '' && rate_count($dbh, 'mail_signup', 'ip:' . $ip, $MAIL_WINDOW_MIN) >= $MAIL_MAX_PER_IP)) {
+            respond({ ok => JSON::PP::true });
+        }
+        rate_add($dbh, 'mail_signup', 'email:' . lc($email));
+        rate_add($dbh, 'mail_signup', 'ip:' . $ip) if $ip ne '';
+        purge_old_rate_events($dbh);
+
         # 既に登録済みでも、存在の有無を秘匿するため未登録時と同じ {ok} を返す。
         if ($dbh->selectrow_array('SELECT 1 FROM users WHERE lower(email) = lower(?)', undef, $email)) {
             send_signup_exists_email($email, app_base_url());
@@ -510,15 +561,37 @@ eval {
         my $email    = defined $body->{email}    ? $body->{email}    : '';
         my $password = defined $body->{password} ? $body->{password} : '';
         $email =~ s/^\s+|\s+$//g;
+        my $ip = $ENV{REMOTE_ADDR} // '';
+        my $ekey = 'email:' . lc($email);
+        my $ikey = 'ip:' . $ip;
+
+        # 直近の失敗が多すぎる（同一メール or 同一IP）なら一時的に拒否する（総当たり抑止）。
+        if (rate_count($dbh, 'login_fail', $ekey, $LOGIN_WINDOW_MIN) >= $LOGIN_MAX_PER_EMAIL
+            || ($ip ne '' && rate_count($dbh, 'login_fail', $ikey, $LOGIN_WINDOW_MIN) >= $LOGIN_MAX_PER_IP)) {
+            fail('too_many_attempts', '429 Too Many Requests');
+        }
+
         my $u = $dbh->selectrow_hashref(
             'SELECT id, username, email, password_hash, salt, iterations, is_admin
                FROM users WHERE lower(email) = lower(?)',
             undef, $email
         );
-        fail('invalid_credentials', '401 Unauthorized') unless $u;
-        my $hash = pbkdf2($password, $u->{salt}, $u->{iterations});
-        fail('invalid_credentials', '401 Unauthorized')
-            unless const_eq($hash, $u->{password_hash});
+        # ユーザーが存在しなくてもダミーで PBKDF2 を回し、応答時間でのアカウント列挙を防ぐ。
+        my $ok = 0;
+        if ($u) {
+            my $hash = pbkdf2($password, $u->{salt}, $u->{iterations});
+            $ok = const_eq($hash, $u->{password_hash});
+        } else {
+            pbkdf2($password, '0' x 32, $PBKDF2_ITER);
+        }
+        unless ($ok) {
+            rate_add($dbh, 'login_fail', $ekey);
+            rate_add($dbh, 'login_fail', $ikey) if $ip ne '';
+            purge_old_rate_events($dbh);
+            fail('invalid_credentials', '401 Unauthorized');
+        }
+        # 成功したらそのメールの失敗記録をクリア（正規利用者が締め出されないように）。
+        rate_clear($dbh, 'login_fail', $ekey);
         start_session($dbh, $u->{id});
         respond({ username => $u->{username}, email => $u->{email}, is_admin => pgbool($u->{is_admin}) });
     }
@@ -554,8 +627,19 @@ eval {
         my $email = defined $body->{email} ? $body->{email} : '';
         $email =~ s/^\s+|\s+$//g;
         fail('email_required') if $email eq '';
+
+        # メール爆撃対策: 直近の送信が宛先/IP ごとに多すぎるときは送らない（応答は常に {ok}）。
+        my $ip = $ENV{REMOTE_ADDR} // '';
+        if (rate_count($dbh, 'mail_reset', 'email:' . lc($email), $MAIL_WINDOW_MIN) >= $MAIL_MAX_PER_EMAIL
+            || ($ip ne '' && rate_count($dbh, 'mail_reset', 'ip:' . $ip, $MAIL_WINDOW_MIN) >= $MAIL_MAX_PER_IP)) {
+            respond({ ok => JSON::PP::true });
+        }
+
         my $uid = $dbh->selectrow_array('SELECT id FROM users WHERE lower(email) = lower(?)', undef, $email);
         if ($uid) {
+            # 実際に送るときだけ1通ぶんを記録する（爆撃されるのは実在アドレス宛のため）。
+            rate_add($dbh, 'mail_reset', 'email:' . lc($email));
+            rate_add($dbh, 'mail_reset', 'ip:' . $ip) if $ip ne '';
             $dbh->do('DELETE FROM reset_tokens WHERE user_id = ?', undef, $uid);
             my $token = random_hex(32);
             $dbh->do(
@@ -564,6 +648,7 @@ eval {
                 undef, $token, $uid
             );
             purge_expired_reset_tokens($dbh);
+            purge_old_rate_events($dbh);
             send_reset_email($email, app_base_url() . "?reset=$token");
         }
         # 存在の有無は秘匿。登録の有無に関わらず {ok} を返す。

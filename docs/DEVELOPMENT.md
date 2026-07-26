@@ -179,7 +179,7 @@ dev（`~/public_html/zigsaw` → `/~sugawara/zigsaw/`）とは別系統の本番
 - システム perl `/usr/bin/perl` に `perl-DBI` / `perl-DBD-Pg` / `perl-JSON-PP` / `perl-Digest-SHA` を導入済み。
 - DB `zigsaw` は作成済み（`createdb zigsaw`）。スキーマは `ddl/` にリレーションごとに置いてある。
   新規構築は依存順に流す:
-  `for f in users sessions signup_tokens reset_tokens images puzzles progress; do psql -d zigsaw -f ddl/$f.sql; done`。
+  `for f in users sessions signup_tokens reset_tokens access_log rate_events images puzzles progress; do psql -d zigsaw -f ddl/$f.sql; done`。
 - CGI は suexec で `sugawara` として動くため、peer 認証でパスワード無し接続できる。
 - 環境名は `env.pl`（git 管理外。`env.pl.example` をコピーして作る）の `$main::ZIGSAW_ENV`。
 - メール送信は `/usr/sbin/sendmail` を使う（差出人 `zigsaw@peanutsjamjam.jp`）。
