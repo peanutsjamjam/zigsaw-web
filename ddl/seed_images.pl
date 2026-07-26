@@ -8,9 +8,10 @@
 #   すると incoming/ の各画像を images/full と images/thumb にコピーし、DB に owner_id=NULL
 #   （＝管理者設置）で登録して、incoming/ からは取り除く。
 #
-# ※ サーバーに画像処理系が無いので、縮小もサムネ生成もしない（full と thumb には同じ
-#    元画像をそのまま置く）。遊ぶときはブラウザ側で縮小するので、大きすぎる画像は
-#    あらかじめ手元で適当な大きさ（長辺 1800px 程度）に縮小してから置くのが望ましい。
+# ※ サムネイル（thumb）は GraphicsMagick（gm）で長辺 600px 以内に縮小して生成する。
+#    full はそのまま置く（遊ぶ用）。大きすぎる元画像は、あらかじめ手元で適当な大きさ
+#    （長辺 1800px 程度）に縮小してから置くのが望ましい。
+#    gm が無い環境では GM_BIN のパスを直すか、gm を導入すること（memo.txt 参照）。
 use strict;
 use warnings;
 use DBI;
@@ -25,6 +26,21 @@ my $IMAGE_DIR  = "$ROOT/images";
 my $INCOMING   = "$IMAGE_DIR/incoming";
 
 my %EXT_OK = map { $_ => 1 } qw(jpg jpeg png webp gif);
+
+# サムネ生成に使う GraphicsMagick の実行ファイル。長辺 THUMB_MAX px 以内に縮小する。
+my $GM_BIN    = '/usr/bin/gm';
+my $THUMB_MAX = 600;
+
+# 元画像 $src から、$dst に長辺 THUMB_MAX px 以内のサムネを作る（アスペクト比維持、
+# 元より大きくはしない = '>'）。成功で 1、失敗で 0 を返す。
+sub make_thumb {
+    my ($src, $dst) = @_;
+    # 出力形式は "jpg:" で明示（$dst の拡張子が .jpg でも、念のため確実に JPEG にする）。
+    my @cmd = ($GM_BIN, 'convert', $src,
+               '-resize', "${THUMB_MAX}x${THUMB_MAX}>", '-quality', '82', "jpg:$dst");
+    my $rc = system(@cmd);
+    return $rc == 0 ? 1 : 0;
+}
 
 # ---- 画像の寸法を読む（PNG / JPEG のみ。それ以外は 0x0） --------------------
 sub image_size {
@@ -113,7 +129,9 @@ for my $name (@files) {
     my $basename = random_hex(16);
     eval {
         copy_file($src, "$IMAGE_DIR/full/$basename.$ext");
-        copy_file($src, "$IMAGE_DIR/thumb/$basename.$ext");
+        # サムネは常に JPEG（full の拡張子に関わらず thumb は .jpg に統一）。
+        make_thumb($src, "$IMAGE_DIR/thumb/$basename.jpg")
+            or die "gm によるサムネ生成に失敗（gm は入っていますか）";
         # display_name と original_name にはファイル名（拡張子抜き）を入れる。upload_ip は NULL。
         $dbh->do(
             'INSERT INTO images (owner_id, basename, ext, display_name, original_name, width, height)
@@ -124,7 +142,7 @@ for my $name (@files) {
         1;
     } or do {
         warn "登録失敗: $name: $@\n";
-        unlink "$IMAGE_DIR/full/$basename.$ext", "$IMAGE_DIR/thumb/$basename.$ext";
+        unlink "$IMAGE_DIR/full/$basename.$ext", "$IMAGE_DIR/thumb/$basename.jpg";
         next;
     };
     print "登録: $name  (${w}x${h})\n";

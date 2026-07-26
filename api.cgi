@@ -445,7 +445,7 @@ sub image_row_to_json {
         created_at    => $row->{created_at},        # 投稿日時
         mine          => $row->{mine} ? JSON::PP::true : JSON::PP::false,
         full_url      => "${base_url}images/full/$row->{basename}.$row->{ext}",
-        thumb_url    => "${base_url}images/thumb/$row->{basename}.$row->{ext}",
+        thumb_url    => "${base_url}images/thumb/$row->{basename}.jpg",   # サムネは常に JPEG
     };
 }
 
@@ -465,7 +465,7 @@ sub puzzle_row_to_json {
         width         => 0 + $row->{width},
         height        => 0 + $row->{height},
         full_url      => "${base_url}images/full/$row->{basename}.$row->{ext}",
-        thumb_url     => "${base_url}images/thumb/$row->{basename}.$row->{ext}",
+        thumb_url     => "${base_url}images/thumb/$row->{basename}.jpg",   # サムネは常に JPEG
     };
 }
 
@@ -878,10 +878,12 @@ eval {
         my $basename = random_hex(16);
         eval {
             write_file("$IMAGE_DIR/full/$basename.$ext", $full_bytes);
-            write_file("$IMAGE_DIR/thumb/$basename.$ext", $thumb_bytes);
+            # サムネは常に JPEG（クライアントが image/jpeg で生成して送る）。full の
+            # 拡張子（png/webp/gif）に関わらず thumb は .jpg に統一する。
+            write_file("$IMAGE_DIR/thumb/$basename.jpg", $thumb_bytes);
             1;
         } or do {
-            unlink "$IMAGE_DIR/full/$basename.$ext", "$IMAGE_DIR/thumb/$basename.$ext";
+            unlink "$IMAGE_DIR/full/$basename.$ext", "$IMAGE_DIR/thumb/$basename.jpg";
             fail('image_write_failed', '500 Internal Server Error');
         };
 
@@ -933,7 +935,7 @@ eval {
         fail('forbidden', '403 Forbidden')
             unless (defined $row->{owner_id} && $row->{owner_id} == $u->{id}) || pgbool($u->{is_admin}) == JSON::PP::true;
         $dbh->do('DELETE FROM images WHERE id = ?', undef, $id);   # puzzles→progress も CASCADE で消える
-        unlink "$IMAGE_DIR/full/$row->{basename}.$row->{ext}", "$IMAGE_DIR/thumb/$row->{basename}.$row->{ext}";
+        unlink "$IMAGE_DIR/full/$row->{basename}.$row->{ext}", "$IMAGE_DIR/thumb/$row->{basename}.jpg";
         respond({ ok => JSON::PP::true });
     }
     elsif ($action eq 'puzzles' && $method eq 'GET') {
