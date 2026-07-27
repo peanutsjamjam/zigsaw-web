@@ -12,6 +12,9 @@ import { statusFromState, STATUS_TEXT, type PuzzleStatus } from '../lib/status'
 import { formatElapsed } from '../lib/format'
 import { AccountMenu } from './AccountMenu'
 
+// 画像一覧の1ページあたりの枚数。これを超えるぶんはページを分けて出す。
+const IMAGES_PER_PAGE = 30
+
 // タグの上限（api.cgi の $MAX_TAG_LENGTH / $MAX_TAGS_PER_IMAGE と揃える）。
 const MAX_TAG_LENGTH = 30
 const MAX_TAGS_PER_IMAGE = 20
@@ -111,6 +114,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
   // 一覧の絞り込み。null なら絞り込まない（「すべて」）。
   const [filter, setFilter] = useState<Filter | null>(null)
+  // 画像一覧のページ（1始まり）。
+  const [imagePage, setImagePage] = useState(1)
   // プレイ中パズルの画像エリアのタブ（完成図 / 現在の様子）。既定は「現在の様子」。
   const [puzzleTab, setPuzzleTab] = useState<'finished' | 'current'>('current')
   // 「現在の様子」スナップショットは一覧に含まれないので、詳細を開いたとき progress id ごとに
@@ -185,6 +190,18 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     if (filter.kind === 'mine') return puzzles.filter((p) => myImageIds.has(p.image_id))
     return puzzles.filter((p) => inPieceRange(p, filter))
   }, [puzzles, myImageIds, filter])
+
+  // 画像一覧のページ分け。絞り込みを変えたら1ページ目に戻し、
+  // 枚数が減ってページ数を超えたら最後のページに寄せる。
+  const imagePageCount = Math.max(1, Math.ceil(visibleImages.length / IMAGES_PER_PAGE))
+  useEffect(() => { setImagePage(1) }, [filter])
+  useEffect(() => {
+    setImagePage((cur) => Math.min(cur, imagePageCount))
+  }, [imagePageCount])
+  const pagedImages = useMemo(
+    () => visibleImages.slice((imagePage - 1) * IMAGES_PER_PAGE, imagePage * IMAGES_PER_PAGE),
+    [visibleImages, imagePage],
+  )
 
   // 画像を選んだら、まず画像情報の修正画面（mode:'edit'）を出す。
   const selectImage = (image: GalleryImage) => {
@@ -851,7 +868,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             : 'この絞り込みに合う画像はありません。'}
         >
           <div className="card-grid">
-            {visibleImages.map((image) => (
+            {pagedImages.map((image) => (
               <button
                 key={image.id}
                 type="button"
@@ -865,6 +882,14 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             ))}
             <UploadCard uploading={uploading} onFile={pickFile} />
           </div>
+          {/* 一覧の下のページ送り。1ページ = IMAGES_PER_PAGE 枚。 */}
+          <Pager
+            page={imagePage}
+            pageCount={imagePageCount}
+            total={visibleImages.length}
+            perPage={IMAGES_PER_PAGE}
+            onChange={setImagePage}
+          />
         </Section>
       )}
 
@@ -1056,6 +1081,48 @@ function Section({ title, empty, emptyText, children }: {
     <div className="section">
       <h2 className="section-title">{title}</h2>
       {empty ? <div className="muted">{emptyText}</div> : children}
+    </div>
+  )
+}
+
+/** 一覧のページ送り。«（最初）‹（前）ページ番号 ›（次）»（最後）。1ページのときは出さない。 */
+function Pager({ page, pageCount, total, perPage, onChange }: {
+  page: number
+  pageCount: number
+  total: number
+  perPage: number
+  onChange: (next: number) => void
+}) {
+  if (pageCount <= 1) return null
+  // 番号は現在のページの前後2つ（最大5つ）だけ出し、ページが増えても横に伸びすぎないようにする。
+  const start = Math.max(1, Math.min(page - 2, pageCount - 4))
+  const end = Math.min(pageCount, start + 4)
+  const numbers: number[] = []
+  for (let i = start; i <= end; i++) numbers.push(i)
+  const from = (page - 1) * perPage + 1
+  const to = Math.min(total, page * perPage)
+  return (
+    <div className="pager">
+      <button type="button" className="pager-btn" disabled={page === 1}
+        onClick={() => onChange(1)} title="最初のページ" aria-label="最初のページ">«</button>
+      <button type="button" className="pager-btn" disabled={page === 1}
+        onClick={() => onChange(page - 1)} title="前のページ" aria-label="前のページ">‹</button>
+      {numbers.map((n) => (
+        <button
+          key={n}
+          type="button"
+          className={`pager-btn${n === page ? ' current' : ''}`}
+          aria-current={n === page ? 'page' : undefined}
+          onClick={() => onChange(n)}
+        >
+          {n}
+        </button>
+      ))}
+      <button type="button" className="pager-btn" disabled={page === pageCount}
+        onClick={() => onChange(page + 1)} title="次のページ" aria-label="次のページ">›</button>
+      <button type="button" className="pager-btn" disabled={page === pageCount}
+        onClick={() => onChange(pageCount)} title="最後のページ" aria-label="最後のページ">»</button>
+      <span className="muted pager-range">{total}枚中 {from}〜{to}枚</span>
     </div>
   )
 }
