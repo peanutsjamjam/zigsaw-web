@@ -272,6 +272,22 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           <button type="button" className="selection-close" onClick={() => setSelection(null)} aria-label="閉じる" title="閉じる">
             <X size={18} />
           </button>
+          {/* 画面名（カード左上に小さく）。画像一覧から開いた画像情報編集画面のときだけ出す。 */}
+          {selection.kind === 'image' && selection.mode === 'edit' && (
+            <div className="selection-name">画像情報</div>
+          )}
+          {/* パズル一覧から開いたパズル情報編集画面のとき。 */}
+          {selection.kind === 'puzzle' && selection.mode === 'edit' && (
+            <div className="selection-name">パズル情報</div>
+          )}
+          {/* 画像からピース数を決めるパズル作成画面のとき。 */}
+          {selection.kind === 'image' && selection.mode === 'create' && (
+            <div className="selection-name">パズル作成</div>
+          )}
+          {/* プレイしたパズルから開いた進捗情報画面のとき。 */}
+          {selection.kind === 'puzzle' && selection.mode === 'play' && (
+            <div className="selection-name">進捗情報</div>
+          )}
 
 
           {/* 画像を選んだとき（mode:'edit'）: 左に画像、右にファイル名・タイトル編集・サイズ・各ボタン。 */}
