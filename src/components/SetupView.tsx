@@ -43,6 +43,41 @@ type Selection =
   | { kind: 'image'; image: GalleryImage; mode: 'edit' | 'create' }
   | { kind: 'puzzle'; puzzle: Puzzle; mode: 'edit' | 'play' }
 
+// 一覧の絞り込み。実際のタグのほかに、タグではない切り口（仮想タグ）でも絞り込める。
+//   tag    … その名前のタグが付いた画像／パズル
+//   mine   … 自分がアップロードした画像／その画像から作られたパズル
+//   pieces … ピース数がその範囲のパズル／そのパズルを持つ画像
+type Filter =
+  | { kind: 'tag'; name: string }
+  | { kind: 'mine' }
+  | { kind: 'pieces'; label: string; min: number; max: number | null }
+
+// ピース数の仮想タグ（列×行の合計で分ける）。
+const PIECE_RANGES: { label: string; min: number; max: number | null }[] = [
+  { label: '〜50ピース',  min: 0,   max: 50 },
+  { label: '〜100ピース', min: 51,  max: 100 },
+  { label: '〜200ピース', min: 101, max: 200 },
+  { label: '〜300ピース', min: 201, max: 300 },
+  { label: '〜400ピース', min: 301, max: 400 },
+  { label: '401〜ピース', min: 401, max: null },
+]
+
+/** パズルのピース数が、その仮想タグの範囲に入るか。 */
+function inPieceRange(puzzle: Puzzle, range: { min: number; max: number | null }): boolean {
+  const pieces = puzzle.columns * puzzle.rows
+  return pieces >= range.min && (range.max === null || pieces <= range.max)
+}
+
+/** 絞り込みを見分けるための文字列（チップの選択状態の比較に使う）。 */
+function filterKey(filter: Filter): string {
+  return filter.kind === 'tag' ? `tag:${filter.name}` : filter.kind === 'mine' ? 'mine' : `pieces:${filter.label}`
+}
+
+/** 見出しに出す絞り込みの名前。 */
+function filterLabel(filter: Filter): string {
+  return filter.kind === 'tag' ? filter.name : filter.kind === 'mine' ? '自分の画像' : filter.label
+}
+
 export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, onLoggedOut, busy }: Props) {
   const [images, setImages] = useState<GalleryImage[]>([])
   const [puzzles, setPuzzles] = useState<Puzzle[]>([])
@@ -74,8 +109,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [savingTags, setSavingTags] = useState(false)
   const [savingName, setSavingName] = useState(false)
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
-  // タグでの絞り込み。null なら絞り込まない（「すべて」）。
-  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  // 一覧の絞り込み。null なら絞り込まない（「すべて」）。
+  const [filter, setFilter] = useState<Filter | null>(null)
   // プレイ中パズルの画像エリアのタブ（完成図 / 現在の様子）。既定は「現在の様子」。
   const [puzzleTab, setPuzzleTab] = useState<'finished' | 'current'>('current')
   // 「現在の様子」スナップショットは一覧に含まれないので、詳細を開いたとき progress id ごとに
@@ -119,15 +154,37 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     return [...names].sort((a, b) => a.localeCompare(b, 'ja'))
   }, [images, puzzles])
 
-  // タグで絞り込んだ画像・パズル（「プレイしたパズル」は絞り込まない）。
-  const visibleImages = useMemo(
-    () => (tagFilter === null ? images : images.filter((i) => i.tags.includes(tagFilter))),
-    [images, tagFilter],
+  // 仮想タグの並び。「自分の画像」はログイン中だけ出す。
+  const virtualFilters = useMemo<Filter[]>(
+    () => [
+      ...(account ? [{ kind: 'mine' } as const] : []),
+      ...PIECE_RANGES.map((r) => ({ kind: 'pieces' as const, ...r })),
+    ],
+    [account],
   )
-  const visiblePuzzles = useMemo(
-    () => (tagFilter === null ? puzzles : puzzles.filter((p) => p.tags.includes(tagFilter))),
-    [puzzles, tagFilter],
+
+  // 自分がアップロードした画像の id（仮想タグ「自分の画像」でパズルを絞るのに使う。
+  // パズル JSON の mine は「作成者が自分か」なので、画像の持ち主とは別物）。
+  const myImageIds = useMemo(
+    () => new Set(images.filter((i) => i.mine).map((i) => i.id)),
+    [images],
   )
+
+  // タグ・仮想タグで絞り込んだ画像・パズル（「プレイしたパズル」は絞り込まない）。
+  // ピース数の仮想タグでは、画像一覧はその範囲のパズルを持つ画像だけになる。
+  const visibleImages = useMemo(() => {
+    if (filter === null) return images
+    if (filter.kind === 'tag') return images.filter((i) => i.tags.includes(filter.name))
+    if (filter.kind === 'mine') return images.filter((i) => i.mine)
+    return images.filter((i) => puzzles.some((p) => p.image_id === i.id && inPieceRange(p, filter)))
+  }, [images, puzzles, filter])
+
+  const visiblePuzzles = useMemo(() => {
+    if (filter === null) return puzzles
+    if (filter.kind === 'tag') return puzzles.filter((p) => p.tags.includes(filter.name))
+    if (filter.kind === 'mine') return puzzles.filter((p) => myImageIds.has(p.image_id))
+    return puzzles.filter((p) => inPieceRange(p, filter))
+  }, [puzzles, myImageIds, filter])
 
   // 画像を選んだら、まず画像情報の修正画面（mode:'edit'）を出す。
   const selectImage = (image: GalleryImage) => {
@@ -763,38 +820,33 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
 
       {/* タグ一覧。押すと、そのタグが付いた画像と、その画像から作られたパズルだけを出す。
           もう一度押すか「すべて」で絞り込みを解除する（「プレイしたパズル」は絞り込まない）。 */}
-      {allTags.length > 0 && (
-        <Section title="タグ一覧" empty={false} emptyText="">
-          <div className="tag-filters">
-            <button
-              type="button"
-              className={`tag-filter${tagFilter === null ? ' selected' : ''}`}
-              onClick={() => setTagFilter(null)}
-            >
-              すべて
-            </button>
-            {allTags.map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={`tag-filter${tagFilter === t ? ' selected' : ''}`}
-                onClick={() => setTagFilter((cur) => (cur === t ? null : t))}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        </Section>
-      )}
+      <Section title="タグ一覧" empty={false} emptyText="">
+        <div className="tag-filters">
+          <button
+            type="button"
+            className={`tag-filter${filter === null ? ' selected' : ''}`}
+            onClick={() => setFilter(null)}
+          >
+            すべて
+          </button>
+          {/* 仮想タグ（実際のタグではない切り口）。破線の枠で見分けられるようにする。 */}
+          {virtualFilters.map((f) => (
+            <FilterChip key={filterKey(f)} filter={f} current={filter} onSelect={setFilter} virtual />
+          ))}
+          {allTags.map((t) => (
+            <FilterChip key={`tag:${t}`} filter={{ kind: 'tag', name: t }} current={filter} onSelect={setFilter} />
+          ))}
+        </div>
+      </Section>
 
       {/* 画像一覧（要ログイン） */}
       {account && (
         <Section
-          title={tagFilter === null ? '画像一覧' : `画像一覧（タグ: ${tagFilter}）`}
+          title={filter === null ? '画像一覧' : `画像一覧（${filterLabel(filter)}）`}
           empty={!loading && visibleImages.length === 0}
-          emptyText={tagFilter === null
+          emptyText={filter === null
             ? 'まだ画像がありません。右のカードから画像をアップロードできます。'
-            : 'このタグが付いた画像はありません。'}
+            : 'この絞り込みに合う画像はありません。'}
         >
           <div className="card-grid">
             {visibleImages.map((image) => (
@@ -816,10 +868,10 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
 
       {/* パズル一覧（常に表示） */}
       <Section
-        title={tagFilter === null ? 'パズル一覧' : `パズル一覧（タグ: ${tagFilter}）`}
+        title={filter === null ? 'パズル一覧' : `パズル一覧（${filterLabel(filter)}）`}
         empty={!loading && visiblePuzzles.length === 0}
-        emptyText={tagFilter !== null
-          ? 'このタグが付いた画像から作られたパズルはありません。'
+        emptyText={filter !== null
+          ? 'この絞り込みに合うパズルはありません。'
           : account ? '「画像一覧」から画像を選び、ピース数を決めてパズルを作成できます。' : 'まだパズルがありません。'}>
         <div className="card-grid">
           {visiblePuzzles.map((puzzle) => (
@@ -1003,6 +1055,25 @@ function Section({ title, empty, emptyText, children }: {
       <h2 className="section-title">{title}</h2>
       {empty ? <div className="muted">{emptyText}</div> : children}
     </div>
+  )
+}
+
+/** タグ一覧の1つ。押すとその絞り込みにし、選択中のものをもう一度押すと解除する。 */
+function FilterChip({ filter, current, onSelect, virtual }: {
+  filter: Filter
+  current: Filter | null
+  onSelect: (next: Filter | null) => void
+  virtual?: boolean
+}) {
+  const selected = current !== null && filterKey(current) === filterKey(filter)
+  return (
+    <button
+      type="button"
+      className={`tag-filter${virtual ? ' virtual' : ''}${selected ? ' selected' : ''}`}
+      onClick={() => onSelect(selected ? null : filter)}
+    >
+      {filterLabel(filter)}
+    </button>
   )
 }
 

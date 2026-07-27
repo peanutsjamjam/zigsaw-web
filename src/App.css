@@ -354,6 +354,9 @@
 }
 .tag-filter:hover { border-color: var(--accent); }
 .tag-filter.selected { background: var(--accent); border-color: transparent; color: #fff; }
+/* 仮想タグ（実際のタグではない切り口）。実タグと見分けられるよう破線にする。 */
+.tag-filter.virtual { border-style: dashed; background: transparent; color: var(--muted); }
+.tag-filter.virtual.selected { background: var(--accent); border-style: solid; color: #fff; }
 /* タグのチップ。右の × でその画像からタグを外す。 */
 .tag-chip { display: inline-flex; align-items: center; gap: 5px; padding-right: 5px; }
 .tag-remove {
