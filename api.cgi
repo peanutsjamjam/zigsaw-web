@@ -1111,6 +1111,8 @@ eval {
 } or do {
     my $err = $@ || 'unknown error';
     # fail()/respond() は exit するのでここには来ない。ここに来るのは DB 例外など想定外のもの。
+    # 詳細はサーバーログ（Apache error_log）にだけ残し、クライアントには汎用メッセージのみ返す
+    # （内部エラー文やパスの漏えいを防ぐ）。
     warn "unhandled: $err\n";
-    respond({ error => 'server_error', detail => "$err" }, '500 Internal Server Error') unless $err =~ /^ *$/;
+    respond({ error => 'server_error' }, '500 Internal Server Error') unless $err =~ /^ *$/;
 };
