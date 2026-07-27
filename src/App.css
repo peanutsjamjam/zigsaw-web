@@ -331,8 +331,8 @@
   border-radius: 999px;
   background: var(--panel-2);
 }
-/* タグのチップ。左の × でその画像からタグを外す。 */
-.tag-chip { display: inline-flex; align-items: center; gap: 5px; padding-left: 5px; }
+/* タグのチップ。右の × でその画像からタグを外す。 */
+.tag-chip { display: inline-flex; align-items: center; gap: 5px; padding-right: 5px; }
 .tag-remove {
   display: inline-flex;
   align-items: center;

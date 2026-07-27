@@ -2,7 +2,7 @@
 //   「画像一覧」    … アップロードされた画像。選んでピース数を決め、パズルを作成する（要ログイン）。
 //   「パズル一覧」  … 作成済みの共有パズル。誰でもプレイできる（未ログインはこの欄のみ）。
 //   「プレイしたパズル」… ログイン中の自分が遊んだパズル（プレイ中／クリア済み）。再開・再挑戦する。
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlaskConical, Plus, Trash2, Upload, X } from 'lucide-react'
 import { api, type Account, type GalleryImage, type ProgressItem, type Puzzle } from '../api'
 import { prepareUpload } from '../lib/generator'
@@ -64,7 +64,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   // 画像情報修正画面での display_name・tags の編集値と、保存中フラグ・完了通知。
   const [editName, setEditName] = useState('')
   // タグの入力欄。Enter で1つのタグとして保存し、そのつど空に戻す（保存済みタグはチップで出す）。
+  // 続けて入力できるよう、チップの × を押したあとはこの欄へフォーカスを戻す。
   const [editTags, setEditTags] = useState('')
+  const tagInputRef = useRef<HTMLTextAreaElement | null>(null)
   const [savingTags, setSavingTags] = useState(false)
   const [savingName, setSavingName] = useState(false)
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
@@ -176,9 +178,11 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   }
 
   // チップの × を押したとき: そのタグをこの画像から外す。
+  // × ボタンはチップごと消えるのでフォーカスも消える。入力欄に戻して続けて入力できるようにする。
   const removeTag = async (name: string) => {
     if (selection?.kind !== 'image' || savingTags) return
     await saveTags(selection.image, selection.image.tags.filter((t) => t !== name))
+    tagInputRef.current?.focus()
   }
 
   // 「この画像でパズルを作成する」: 従来のピース数決定画面（mode:'create'）へ進む。
@@ -393,6 +397,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                         <div className="grid-chips">
                           {selection.image.tags.map((t) => (
                             <span key={t} className="grid-chip tag-chip">
+                              {t}
                               <button
                                 type="button"
                                 className="tag-remove"
@@ -403,19 +408,19 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                               >
                                 <X size={12} />
                               </button>
-                              {t}
                             </span>
                           ))}
                         </div>
                       )}
-                      {/* 入力して Enter で1つのタグとして付ける（入力欄はそのつど空に戻る）。 */}
+                      {/* 入力して Enter で1つのタグとして付ける（入力欄はそのつど空に戻る）。
+                          保存中も disabled にしない: フォーカスが外れて続けて入力できなくなるため。 */}
                       <textarea
+                        ref={tagInputRef}
                         className="edit-title"
                         value={editTags}
                         maxLength={MAX_TAG_LENGTH}
                         rows={2}
                         placeholder="タグ名を入力して Enter"
-                        disabled={savingTags}
                         onChange={(e) => setEditTags(e.target.value)}
                         onKeyDown={(e) => {
                           // 日本語入力の変換確定 Enter は拾わない。
