@@ -540,14 +540,15 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                     </button>
                   </div>
                   {canDelete && (
-                    <>
-                      <div className="row edit-buttons">
+                    <div className="row edit-buttons">
+                      {/* 非活性の理由は下の文ではなく、ボタン上のツールチップで示す。無効ボタンは
+                          自身が hover を拾わないので、title はラッパー span に付ける。 */}
+                      <span style={{ display: 'inline-flex' }} title={inUse ? 'すでにプレイしている人がいるため削除できません。' : undefined}>
                         <button type="button" className="btn danger" onClick={() => setConfirmingPuzzleRemoval(p)} disabled={busy || inUse}>
                           <Trash2 size={16} /> このパズルを削除する
                         </button>
-                      </div>
-                      {inUse && <div className="muted">すでにプレイしている人がいるため削除できません。</div>}
-                    </>
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>
