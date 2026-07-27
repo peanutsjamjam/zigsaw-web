@@ -9,6 +9,7 @@ import { prepareUpload } from '../lib/generator'
 import type { SavedProgress } from '../api'
 import { PLACEHOLDER_WALK_FRAMES, SHAPE_IMAGES } from '../lib/shapes'
 import { statusFromState, STATUS_TEXT, type PuzzleStatus } from '../lib/status'
+import { formatElapsed } from '../lib/format'
 import { AccountMenu } from './AccountMenu'
 
 export type StartRequest = {
@@ -473,7 +474,13 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                     <span className="edit-label">ピース数</span>
                     <span>{selection.puzzle.columns} x {selection.puzzle.rows}（{selection.puzzle.columns * selection.puzzle.rows}ピース）</span>
                   </div>
-                  {selectedStatus !== 'notStarted' && <div className={`status ${selectedStatus}`}>{STATUS_TEXT[selectedStatus]}</div>}
+                  {selectedStatus !== 'notStarted' && (
+                    <div className={`status ${selectedStatus}`}>
+                      {STATUS_TEXT[selectedStatus]}
+                      {/* クリア済み＝クリア時間、プレイ中＝保存時点までの累積プレイ時間。 */}
+                      {selectedProgress && ` (${formatElapsed(selectedProgress.state.elapsedSeconds ?? 0)})`}
+                    </div>
+                  )}
                   {!account && <div className="muted">※ ログインすると途中経過を保存できます</div>}
                   <div className="row edit-buttons">
                     <button type="button" className="btn primary large" onClick={playSelectedPuzzle} disabled={busy}>
@@ -623,7 +630,11 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                   <div className="card-thumb"><img src={item.puzzle.thumb_url} alt="" loading="lazy" /></div>
                   <div className="card-name">{item.puzzle.display_name}</div>
                   <div className="muted card-owner">{item.puzzle.columns} x {item.puzzle.rows}（{item.puzzle.columns * item.puzzle.rows}ピース）</div>
-                  <div className={`status ${status}`}>{STATUS_TEXT[status]}</div>
+                  <div className={`status ${status}`}>
+                    {STATUS_TEXT[status]}
+                    {/* クリア済み＝クリア時間、プレイ中＝保存時点までの累積プレイ時間。 */}
+                    {status !== 'notStarted' && ` (${formatElapsed(item.state.elapsedSeconds ?? 0)})`}
+                  </div>
                 </button>
               )
             })}
