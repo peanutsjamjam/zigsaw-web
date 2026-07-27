@@ -62,7 +62,11 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [confirmingPuzzleRemoval, setConfirmingPuzzleRemoval] = useState<Puzzle | null>(null)
   const [confirmingProgressRemoval, setConfirmingProgressRemoval] = useState<ProgressItem | null>(null)
   // 画像情報修正画面での display_name・tags の編集値と、保存中フラグ・完了通知。
+  // タイトルは普段ただの文字列で、クリックしたときだけ入力欄になる（editingTitle）。
   const [editName, setEditName] = useState('')
+  const [editingTitle, setEditingTitle] = useState(false)
+  // Enter の直後に blur が走っても二重に保存しないための印（state だと同じ tick では古い値を見る）。
+  const committingTitleRef = useRef(false)
   // タグの入力欄。Enter で1つのタグとして保存し、そのつど空に戻す（保存済みタグはチップで出す）。
   // 続けて入力できるよう、チップの × を押したあとはこの欄へフォーカスを戻す。
   const [editTags, setEditTags] = useState('')
@@ -108,6 +112,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const selectImage = (image: GalleryImage) => {
     setSelection({ kind: 'image', image, mode: 'edit' })
     setEditName(image.display_name)
+    setEditingTitle(false)
     setEditTags('')
     setColumns(6)
     setRows(4)
@@ -119,16 +124,29 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
 
   // ログイン中の自分の画像（または管理者）のみ display_name・tags を変更できる。
   const canEditName = selection?.kind === 'image' && (selection.image.mine || account?.is_admin === true)
-  // 「OK」を押せるか（タイトルが空でなく、保存済みのタイトルと違うとき）。
-  // タグは Enter／× を押した時点で保存するので、ここには関わらない。
-  const imageEditDirty = selection?.kind === 'image'
-    && editName.trim() !== ''
-    && editName.trim() !== selection.image.display_name
+  // タイトルは普段ただの文字列で、クリックすると入力欄になる（Enter で変更、Esc で取りやめ）。
+  const startEditingTitle = () => {
+    if (!canEditName || selection?.kind !== 'image' || savingName) return
+    setEditName(selection.image.display_name)
+    setEditingTitle(true)
+    setError(null)
+  }
+  const cancelEditingTitle = () => {
+    setEditingTitle(false)
+    if (selection?.kind === 'image') setEditName(selection.image.display_name)
+  }
 
-  // 「OK」: display_name の変更を反映する。
-  const saveImageName = async () => {
-    if (selection?.kind !== 'image' || !imageEditDirty) return
+  // タイトルの編集を確定する。空・変更なしなら何も送らず、ただ表示に戻す。
+  const commitTitle = async () => {
+    if (selection?.kind !== 'image' || !editingTitle || committingTitleRef.current) return
+    committingTitleRef.current = true
     const name = editName.trim()
+    setEditingTitle(false)
+    if (name === '' || name === selection.image.display_name) {
+      setEditName(selection.image.display_name)
+      committingTitleRef.current = false
+      return
+    }
     setSavingName(true)
     setError(null)
     try {
@@ -142,6 +160,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSavingName(false)
+      committingTitleRef.current = false
     }
   }
 
@@ -358,16 +377,39 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 </div>
                 <div className="edit-item">
                   <span className="edit-label">タイトル</span>
-                  {canEditName ? (
+                  {!canEditName ? (
+                    <span>{selection.image.display_name}</span>
+                  ) : editingTitle ? (
+                    // 編集中。Enter で変更、Esc で取りやめ、他をクリックしても（＝blur）変更する。
                     <textarea
                       className="edit-title"
                       value={editName}
                       maxLength={200}
                       rows={2}
+                      autoFocus
+                      onFocus={(e) => e.currentTarget.setSelectionRange(editName.length, editName.length)}
                       onChange={(e) => setEditName(e.target.value)}
+                      onBlur={() => void commitTitle()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') { e.preventDefault(); cancelEditingTitle(); return }
+                        // 日本語入力の変換確定 Enter は拾わない。
+                        if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                        e.preventDefault()
+                        void commitTitle()
+                      }}
                     />
                   ) : (
-                    <span>{selection.image.display_name}</span>
+                    // 普段はただの文字列。クリックすると編集できる。
+                    <span
+                      className="edit-title-text"
+                      role="button"
+                      tabIndex={0}
+                      title="クリックして変更"
+                      onClick={startEditingTitle}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); startEditingTitle() } }}
+                    >
+                      {savingName ? '保存中…' : selection.image.display_name}
+                    </span>
                   )}
                 </div>
                 <div className="edit-item">
@@ -440,19 +482,6 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 </div>
                 {nameSavedNotice && <div className="muted">変更しました。</div>}
                 {error && <div className="error">{error}</div>}
-                <div className="row edit-buttons">
-                  {canEditName && (
-                    <button
-                      type="button"
-                      className="btn primary"
-                      onClick={() => void saveImageName()}
-                      disabled={savingName || !imageEditDirty}
-                    >
-                      {savingName ? '保存中…' : 'OK'}
-                    </button>
-                  )}
-                  <button type="button" className="btn" onClick={() => setSelection(null)} disabled={savingName}>キャンセル</button>
-                </div>
                 <div className="edit-item">
                   <span className="edit-label">この画像で作成済みのパズル</span>
                   {puzzlesForSelectedImage.length === 0 ? (

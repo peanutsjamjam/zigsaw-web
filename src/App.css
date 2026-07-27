@@ -321,6 +321,15 @@
 .edit-label { font-size: 12px; color: var(--muted); }
 .edit-filename { word-break: break-all; }
 .edit-title { width: 100%; resize: vertical; font-size: 15px; }
+/* 普段のタイトル表示。クリックすると入力欄（.edit-title）に変わる。 */
+.edit-title-text {
+  cursor: text;
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: -2px -4px;   /* 余白ぶん外へ広げ、他の項目と行位置を揃える */
+}
+.edit-title-text:hover { background: var(--panel-2); }
+.edit-title-text:focus-visible { outline: 2px solid var(--accent-soft); }
 .edit-buttons { justify-content: flex-start; }
 .grid-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .grid-chip {
