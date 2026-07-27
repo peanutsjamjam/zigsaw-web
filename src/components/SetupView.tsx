@@ -833,6 +833,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           {virtualFilters.map((f) => (
             <FilterChip key={filterKey(f)} filter={f} current={filter} onSelect={setFilter} virtual />
           ))}
+          {/* 仮想タグと実タグのあいだで行を分ける（flex の折り返しを強制する空要素）。 */}
+          {allTags.length > 0 && <div className="tag-filters-break" />}
           {allTags.map((t) => (
             <FilterChip key={`tag:${t}`} filter={{ kind: 'tag', name: t }} current={filter} onSelect={setFilter} />
           ))}

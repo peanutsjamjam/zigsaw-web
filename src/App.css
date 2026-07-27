@@ -342,6 +342,8 @@
 }
 /* タグ一覧（絞り込み）。押したタグの画像・パズルだけを一覧に出す。 */
 .tag-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 仮想タグと実タグのあいだで行を分けるための空要素。 */
+.tag-filters-break { flex-basis: 100%; height: 0; }
 .tag-filter {
   font: inherit;
   font-size: 13px;
