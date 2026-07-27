@@ -84,6 +84,9 @@ my $MAIL_WINDOW_MIN     = 60;
 my $MAIL_MAX_PER_EMAIL  = 3;
 my $MAIL_MAX_PER_IP     = 10;
 
+# アクセスログの保持日数。これより古い行は log_access のついでに時々（確率的に）掃除する。
+my $ACCESS_LOG_KEEP_DAYS = 90;
+
 # 実行環境名。api.cgi と同じディレクトリの env.pl（git 管理外。dev/本番で内容が異なる）を
 # require し、その中で $main::ZIGSAW_ENV を設定する。未設置なら 'unknown'。
 our $ZIGSAW_ENV = 'unknown';
@@ -229,6 +232,18 @@ sub log_access {
     return unless defined $ip && $ip ne '';
     eval { $dbh->do('INSERT INTO access_log (user_id, ip_addr) VALUES (?, ?)', undef, $user_id, $ip); 1 }
         or warn "log_access failed: $@\n";
+    # 毎リクエストで DELETE を打つのは無駄なので、たまに（約2%）だけ古い行を掃除する。
+    purge_old_access_log($dbh) if rand() < 0.02;
+}
+
+# 保持日数より古いアクセスログを掃除する（ついで掃除。テーブル肥大化を防ぐ）。
+sub purge_old_access_log {
+    my ($dbh) = @_;
+    eval {
+        $dbh->do('DELETE FROM access_log WHERE accessed_at < now() - make_interval(days => ?)',
+            undef, $ACCESS_LOG_KEEP_DAYS);
+        1;
+    } or warn "purge_old_access_log failed: $@\n";
 }
 
 # ---- レート制限 ------------------------------------------------------------
