@@ -331,6 +331,20 @@
   border-radius: 999px;
   background: var(--panel-2);
 }
+/* タグのチップ。左の × でその画像からタグを外す。 */
+.tag-chip { display: inline-flex; align-items: center; gap: 5px; padding-left: 5px; }
+.tag-remove {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tag-remove:hover:not(:disabled) { color: var(--danger); }
+.tag-remove:disabled { cursor: default; opacity: 0.5; }
 /* いま選んでいるピース数と一致するパズルを枠で強調する。 */
 .grid-chip.current {
   border-color: var(--accent);

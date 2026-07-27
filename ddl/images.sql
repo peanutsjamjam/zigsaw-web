@@ -6,6 +6,7 @@
 --     images/full/<basename>.<ext>   （縮小済みの、遊ぶ用の画像）
 --     images/thumb/<basename>.jpg    （一覧・完成図プレビュー用のサムネイル）
 --   縮小もサムネ生成もクライアント側で行う（サーバーに画像処理系が無いため）。
+--   画像に付けるタグは tags / image_tags（多対多）で持つ。tags.sql 参照。
 CREATE TABLE images (
   id           SERIAL PRIMARY KEY,
   owner_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,

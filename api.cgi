@@ -12,8 +12,9 @@ use File::Basename qw(dirname);
 #
 # 配信:  Apache UserDir 配下、suexec で sugawara として実行される。
 #        そのため PostgreSQL へは peer 認証（パスワード不要）で接続できる。
-# DB:    zigsaw（users / sessions / signup_tokens / reset_tokens / access_log / rate_events / images / puzzles / progress）。
-#        定義は ddl/*.sql 参照。
+# DB:    zigsaw（users / sessions / signup_tokens / reset_tokens / access_log / rate_events / images /
+#        tags / image_tags / puzzles / progress）。
+#        画像のタグは tags / image_tags（多対多）。定義は ddl/*.sql 参照。
 # 認証:  ログイン時にランダムトークンを sessions に保存し、HttpOnly Cookie
 #        (zigsaw_sid) で受け渡す。パスワードは PBKDF2-HMAC-SHA256 で保存。
 #        未ログインでもギャラリー閲覧・プレイはできる（保存だけできない）。
@@ -46,7 +47,8 @@ use File::Basename qw(dirname);
 #   POST   ?action=image  {display_name,original_name,width,height,ext,full,thumb}
 #                                                   -> 画像アップロード（要ログイン。full/thumb は base64。
 #                                                      display_name=タイトル、original_name=ファイル名）
-#   PUT    ?action=image&id=<id>  {display_name}    -> display_name を変更（本人または管理者）
+#   PUT    ?action=image&id=<id>  {display_name,tags?}  -> display_name/タグを変更（本人または管理者。
+#                                                      tags はタグ名の配列。キーが無ければタグは変えない）
 #   DELETE ?action=image&id=<id>                    -> 画像削除（本人または管理者。パズル/進行も CASCADE 削除）
 #   GET    ?action=puzzles                          -> 作成済みパズル一覧（誰でも。画像情報+作成者名つき）
 #   POST   ?action=puzzle {image_id,columns,rows}   -> パズルを作成（同じ画像+グリッドは1つに束ねる。要ログイン）
@@ -461,6 +463,79 @@ sub write_file {
     close $fh or die "close $path: $!";
 }
 
+# ---- タグ（tags / image_tags の多対多） ------------------------------------
+# 画像行（の配列）に、その画像に付いているタグ名を名前順の配列で載せる。
+# 画像1件ごとに引くと件数ぶん問い合わせが増えるので、まとめて1回で引く。
+sub attach_tags {
+    my ($dbh, $rows) = @_;
+    my @ids = map { $_->{id} } @$rows;
+    return $rows unless @ids;
+    my $ph = join ',', ('?') x @ids;
+    my $pairs = $dbh->selectall_arrayref(
+        "SELECT it.image_id, t.name
+           FROM image_tags it JOIN tags t ON t.id = it.tag_id
+          WHERE it.image_id IN ($ph) ORDER BY t.name",
+        { Slice => {} }, @ids
+    );
+    my %by_image;
+    push @{ $by_image{ $_->{image_id} } }, $_->{name} for @$pairs;
+    $_->{tags} = $by_image{ $_->{id} } || [] for @$rows;
+    return $rows;
+}
+
+# 受け取ったタグ（配列、または区切り文字で並べた1つの文字列）を、保存できる名前の配列に整える。
+# 前後の空白を落とし、空・制御文字を除き、重複は1つにまとめる。長さと個数にも上限を置く。
+my $MAX_TAG_LENGTH = 30;
+my $MAX_TAGS_PER_IMAGE = 20;
+sub normalize_tags {
+    my ($input) = @_;
+    my @raw = ref($input) eq 'ARRAY' ? @$input
+            : defined $input         ? split(/[,、\s]+/, $input)
+            :                          ();
+    my (@names, %seen);
+    for my $name (@raw) {
+        next unless defined $name && !ref $name;
+        $name =~ s/[\x00-\x1f\x7f]//g;      # 制御文字は落とす
+        $name =~ s/^[\s\x{3000}]+|[\s\x{3000}]+$//g;   # 全角空白も含めて trim
+        next if $name eq '';
+        $name = substr($name, 0, $MAX_TAG_LENGTH);
+        next if $seen{$name}++;
+        push @names, $name;
+        last if @names >= $MAX_TAGS_PER_IMAGE;
+    }
+    return \@names;
+}
+
+# 画像に付いているタグを、渡された名前の集合そのものに置き換える。
+# 無い名前は tags に作り、外れたタグはどの画像からも参照されなくなったら消す。
+sub set_image_tags {
+    my ($dbh, $image_id, $names) = @_;
+    my @tag_ids;
+    for my $name (@$names) {
+        my $tag_id = $dbh->selectrow_array('SELECT id FROM tags WHERE name = ?', undef, $name);
+        $tag_id = $dbh->selectrow_array(
+            'INSERT INTO tags (name) VALUES (?) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id',
+            undef, $name
+        ) unless defined $tag_id;
+        push @tag_ids, $tag_id;
+    }
+    if (@tag_ids) {
+        my $ph = join ',', ('?') x @tag_ids;
+        $dbh->do("DELETE FROM image_tags WHERE image_id = ? AND tag_id NOT IN ($ph)", undef, $image_id, @tag_ids);
+        $dbh->do('INSERT INTO image_tags (image_id, tag_id) VALUES (?,?) ON CONFLICT DO NOTHING', undef, $image_id, $_)
+            for @tag_ids;
+    } else {
+        $dbh->do('DELETE FROM image_tags WHERE image_id = ?', undef, $image_id);
+    }
+    purge_unused_tags($dbh);
+}
+
+# どの画像からも使われなくなったタグ行を消す（タグ変更・画像削除のついでに呼ぶ）。
+sub purge_unused_tags {
+    my ($dbh) = @_;
+    $dbh->do('DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM image_tags it WHERE it.tag_id = tags.id)');
+}
+
 # 画像1行を、フロントが使いやすい形（URL 付き）に整える。
 sub image_row_to_json {
     my ($base_url, $row) = @_;
@@ -468,6 +543,7 @@ sub image_row_to_json {
         id            => 0 + $row->{id},
         display_name  => $row->{display_name},
         original_name => $row->{original_name},
+        tags          => $row->{tags} || [],        # タグ名の配列（名前順。attach_tags で載せる）
         width         => 0 + $row->{width},
         height        => 0 + $row->{height},
         owner         => $row->{owner_username},   # 投稿者名（管理者設置は null）
@@ -853,7 +929,7 @@ eval {
         } @$prog_rows;
 
         respond({
-            images   => [ map { image_row_to_json($base, $_) } @$img_rows ],
+            images   => [ map { image_row_to_json($base, $_) } @{ attach_tags($dbh, $img_rows) } ],
             puzzles  => [ map { puzzle_row_to_json($base, $_) } @$puz_rows ],
             progress => \@progress,
         });
@@ -872,7 +948,7 @@ eval {
             { Slice => {} }, $uid
         );
         my $base = app_base_url();
-        respond({ images => [ map { image_row_to_json($base, $_) } @$rows ] });
+        respond({ images => [ map { image_row_to_json($base, $_) } @{ attach_tags($dbh, $rows) } ] });
     }
     elsif ($action eq 'image' && $method eq 'POST') {
         my $u = require_user($dbh);
@@ -932,10 +1008,11 @@ eval {
                FROM images i WHERE i.id = ?',
             undef, $u->{username}, $id
         );
+        attach_tags($dbh, [$row]);
         respond({ image => image_row_to_json(app_base_url(), $row) }, '201 Created');
     }
     elsif ($action eq 'image' && $method eq 'PUT') {
-        # 画像情報の変更。変更できるのは display_name のみ。本人か管理者のみ。
+        # 画像情報の変更。変更できるのは display_name と tags。本人か管理者のみ。
         my $u = require_user($dbh);
         my $id = int(query_param('id') || 0);
         my $body = read_body_json();
@@ -948,12 +1025,15 @@ eval {
         fail('forbidden', '403 Forbidden')
             unless (defined $row->{owner_id} && $row->{owner_id} == $u->{id}) || pgbool($u->{is_admin}) == JSON::PP::true;
         $dbh->do('UPDATE images SET display_name = ? WHERE id = ?', undef, $display_name, $id);
+        # タグ（tags / image_tags）。キーが無ければ今のタグを変えない。空配列なら全部外す。
+        set_image_tags($dbh, $id, normalize_tags($body->{tags})) if exists $body->{tags};
         my $updated = $dbh->selectrow_hashref(
             'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at, host(i.upload_ip) AS upload_ip,
                     ou.username AS owner_username, (i.owner_id = ?) AS mine
                FROM images i LEFT JOIN users ou ON ou.id = i.owner_id WHERE i.id = ?',
             undef, $u->{id}, $id
         );
+        attach_tags($dbh, [$updated]);
         respond({ image => image_row_to_json(app_base_url(), $updated) });
     }
     elsif ($action eq 'image' && $method eq 'DELETE') {
@@ -964,7 +1044,8 @@ eval {
         # 本人か管理者のみ削除できる。
         fail('forbidden', '403 Forbidden')
             unless (defined $row->{owner_id} && $row->{owner_id} == $u->{id}) || pgbool($u->{is_admin}) == JSON::PP::true;
-        $dbh->do('DELETE FROM images WHERE id = ?', undef, $id);   # puzzles→progress も CASCADE で消える
+        $dbh->do('DELETE FROM images WHERE id = ?', undef, $id);   # puzzles→progress、image_tags も CASCADE で消える
+        purge_unused_tags($dbh);   # その画像にしか付いていなかったタグを残さない
         unlink "$IMAGE_DIR/full/$row->{basename}.$row->{ext}", "$IMAGE_DIR/thumb/$row->{basename}.jpg";
         respond({ ok => JSON::PP::true });
     }

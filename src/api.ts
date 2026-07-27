@@ -17,6 +17,7 @@ export type GalleryImage = {
   id: number
   display_name: string
   original_name: string   // アップロード時の元の名前（当初は display_name と同じ）
+  tags: string[]          // この画像に付いているタグ名（名前順。未設定なら空配列）
   width: number
   height: number
   owner: string | null   // 投稿者名。管理者が置いた画像は null
@@ -183,8 +184,9 @@ export const api = {
   images: () => request<{ images: GalleryImage[] }>('?action=images').then((r) => r.images),
   uploadImage: (payload: { display_name: string; original_name: string; ext: string; width: number; height: number; full: string; thumb: string }) =>
     postJson<{ image: GalleryImage }>('?action=image', payload).then((r) => r.image),
-  updateImage: (id: number, display_name: string) =>
-    request<{ image: GalleryImage }>(`?action=image&id=${id}`, { method: 'PUT', body: JSON.stringify({ display_name }) }).then((r) => r.image),
+  // tags はタグ名の配列。サーバー側で正規化（trim・重複除去・上限）してから保存される。
+  updateImage: (id: number, display_name: string, tags: string[]) =>
+    request<{ image: GalleryImage }>(`?action=image&id=${id}`, { method: 'PUT', body: JSON.stringify({ display_name, tags }) }).then((r) => r.image),
   deleteImage: (id: number) => request<{ ok: true }>(`?action=image&id=${id}`, { method: 'DELETE' }),
 
   puzzles: () => request<{ puzzles: Puzzle[] }>('?action=puzzles').then((r) => r.puzzles),

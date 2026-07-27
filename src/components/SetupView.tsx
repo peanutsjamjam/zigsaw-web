@@ -12,6 +12,10 @@ import { statusFromState, STATUS_TEXT, type PuzzleStatus } from '../lib/status'
 import { formatElapsed } from '../lib/format'
 import { AccountMenu } from './AccountMenu'
 
+// タグの上限（api.cgi の $MAX_TAG_LENGTH / $MAX_TAGS_PER_IMAGE と揃える）。
+const MAX_TAG_LENGTH = 30
+const MAX_TAGS_PER_IMAGE = 20
+
 export type StartRequest = {
   puzzle: Puzzle
   /** 続きから始めるなら復元する状態。最初から始めるなら null。 */
@@ -57,8 +61,11 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [confirmingRemoval, setConfirmingRemoval] = useState<GalleryImage | null>(null)
   const [confirmingPuzzleRemoval, setConfirmingPuzzleRemoval] = useState<Puzzle | null>(null)
   const [confirmingProgressRemoval, setConfirmingProgressRemoval] = useState<ProgressItem | null>(null)
-  // 画像情報修正画面での display_name の編集値と、保存中フラグ・完了通知。
+  // 画像情報修正画面での display_name・tags の編集値と、保存中フラグ・完了通知。
   const [editName, setEditName] = useState('')
+  // タグの入力欄。Enter で1つのタグとして保存し、そのつど空に戻す（保存済みタグはチップで出す）。
+  const [editTags, setEditTags] = useState('')
+  const [savingTags, setSavingTags] = useState(false)
   const [savingName, setSavingName] = useState(false)
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
   // プレイ中パズルの画像エリアのタブ（完成図 / 現在の様子）。既定は「現在の様子」。
@@ -99,6 +106,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const selectImage = (image: GalleryImage) => {
     setSelection({ kind: 'image', image, mode: 'edit' })
     setEditName(image.display_name)
+    setEditTags('')
     setColumns(6)
     setRows(4)
     setError(null)
@@ -107,19 +115,24 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const selectPuzzleForEdit = (puzzle: Puzzle) => { setSelection({ kind: 'puzzle', puzzle, mode: 'edit' }); setError(null) }
   const selectPuzzleForPlay = (puzzle: Puzzle) => { setSelection({ kind: 'puzzle', puzzle, mode: 'play' }); setPuzzleTab('current') }
 
-  // ログイン中の自分の画像（または管理者）のみ display_name を変更できる。
+  // ログイン中の自分の画像（または管理者）のみ display_name・tags を変更できる。
   const canEditName = selection?.kind === 'image' && (selection.image.mine || account?.is_admin === true)
+  // 「OK」を押せるか（タイトルが空でなく、保存済みのタイトルと違うとき）。
+  // タグは Enter／× を押した時点で保存するので、ここには関わらない。
+  const imageEditDirty = selection?.kind === 'image'
+    && editName.trim() !== ''
+    && editName.trim() !== selection.image.display_name
 
   // 「OK」: display_name の変更を反映する。
   const saveImageName = async () => {
-    if (selection?.kind !== 'image') return
+    if (selection?.kind !== 'image' || !imageEditDirty) return
     const name = editName.trim()
-    if (name === '' || name === selection.image.display_name) return
     setSavingName(true)
     setError(null)
     try {
-      const updated = await api.updateImage(selection.image.id, name)
+      const updated = await api.updateImage(selection.image.id, name, selection.image.tags)
       setSelection({ kind: 'image', image: updated, mode: 'edit' })
+      setEditName(updated.display_name)
       await reload()   // 一覧・パズル名（画像名を参照）にも反映する
       setNameSavedNotice(true)
       window.setTimeout(() => setNameSavedNotice(false), 2000)
@@ -128,6 +141,44 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     } finally {
       setSavingName(false)
     }
+  }
+
+  // タグを保存する（追加・削除のどちらも、置き換え後の一覧をそのまま送る）。
+  // タイトルは保存済みの値を送るので、編集中のタイトルを巻き込まない。
+  const saveTags = async (image: GalleryImage, tags: string[]) => {
+    setSavingTags(true)
+    setError(null)
+    try {
+      const updated = await api.updateImage(image.id, image.display_name, tags)
+      setSelection({ kind: 'image', image: updated, mode: 'edit' })
+      // 一覧の該当画像も差し替える（一覧ぜんぶを読み直すほどの変更ではない）。
+      setImages((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingTags(false)
+    }
+  }
+
+  // 入力欄の文字列を1つのタグとして追加する（Enter）。追加できたら入力欄は空に戻す。
+  const addTag = async () => {
+    if (selection?.kind !== 'image' || savingTags) return
+    const name = normalizeTagName(editTags)
+    if (name === '') { setEditTags(''); return }
+    const tags = selection.image.tags
+    if (tags.includes(name)) { setEditTags(''); return }   // すでに付いている
+    if (tags.length >= MAX_TAGS_PER_IMAGE) {
+      setError(`タグは1枚につき${MAX_TAGS_PER_IMAGE}個までです。`)
+      return
+    }
+    setEditTags('')
+    await saveTags(selection.image, [...tags, name])
+  }
+
+  // チップの × を押したとき: そのタグをこの画像から外す。
+  const removeTag = async (name: string) => {
+    if (selection?.kind !== 'image' || savingTags) return
+    await saveTags(selection.image, selection.image.tags.filter((t) => t !== name))
   }
 
   // 「この画像でパズルを作成する」: 従来のピース数決定画面（mode:'create'）へ進む。
@@ -330,6 +381,58 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                   <span className="edit-label">投稿日時</span>
                   <span>{formatTimestamp(selection.image.created_at)}</span>
                 </div>
+                {/* タグ。タイトルと同じ textarea に、区切って並べて入力する。 */}
+                <div className="edit-item">
+                  <span className="edit-label">タグ</span>
+                  {canEditName ? (
+                    <>
+                      {/* いまこの画像に実際に付いている（保存済みの）タグ。× で1つずつ外せる。 */}
+                      {selection.image.tags.length === 0 ? (
+                        <span className="muted">（なし）</span>
+                      ) : (
+                        <div className="grid-chips">
+                          {selection.image.tags.map((t) => (
+                            <span key={t} className="grid-chip tag-chip">
+                              <button
+                                type="button"
+                                className="tag-remove"
+                                onClick={() => void removeTag(t)}
+                                disabled={savingTags}
+                                title="このタグを外す"
+                                aria-label={`タグ「${t}」を外す`}
+                              >
+                                <X size={12} />
+                              </button>
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {/* 入力して Enter で1つのタグとして付ける（入力欄はそのつど空に戻る）。 */}
+                      <textarea
+                        className="edit-title"
+                        value={editTags}
+                        maxLength={MAX_TAG_LENGTH}
+                        rows={2}
+                        placeholder="タグ名を入力して Enter"
+                        disabled={savingTags}
+                        onChange={(e) => setEditTags(e.target.value)}
+                        onKeyDown={(e) => {
+                          // 日本語入力の変換確定 Enter は拾わない。
+                          if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                          e.preventDefault()
+                          void addTag()
+                        }}
+                      />
+                    </>
+                  ) : selection.image.tags.length === 0 ? (
+                    <span className="muted">（なし）</span>
+                  ) : (
+                    <div className="grid-chips">
+                      {selection.image.tags.map((t) => <span key={t} className="grid-chip">{t}</span>)}
+                    </div>
+                  )}
+                </div>
                 {nameSavedNotice && <div className="muted">変更しました。</div>}
                 {error && <div className="error">{error}</div>}
                 <div className="row edit-buttons">
@@ -338,7 +441,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                       type="button"
                       className="btn primary"
                       onClick={() => void saveImageName()}
-                      disabled={savingName || editName.trim() === '' || editName.trim() === selection.image.display_name}
+                      disabled={savingName || !imageEditDirty}
                     >
                       {savingName ? '保存中…' : 'OK'}
                     </button>
@@ -841,6 +944,18 @@ function UploadCard({ uploading, onFile }: { uploading: boolean; onFile: (file: 
 function clampGrid(value: number): number {
   if (!Number.isFinite(value)) return 2
   return Math.min(40, Math.max(2, Math.round(value)))
+}
+
+/**
+ * タグ入力欄の文字列を、1つのタグ名に整える。改行・制御文字と前後の空白（全角含む）を
+ * 落とし、長さの上限で切る。サーバー側（api.cgi の normalize_tags）でも同じ整形が走る。
+ */
+function normalizeTagName(input: string): string {
+  return input
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/^[\s\u3000]+|[\s\u3000]+$/g, '')
+    .slice(0, MAX_TAG_LENGTH)
 }
 
 /** PostgreSQL の timestamptz 文字列を「YYYY-MM-DD HH:MM:SS」に整える。 */
