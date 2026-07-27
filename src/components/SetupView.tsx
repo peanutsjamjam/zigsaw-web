@@ -68,9 +68,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   // Enter の直後に blur が走っても二重に保存しないための印（state だと同じ tick では古い値を見る）。
   const committingTitleRef = useRef(false)
   // タグの入力欄。Enter で1つのタグとして保存し、そのつど空に戻す（保存済みタグはチップで出す）。
-  // 続けて入力できるよう、チップの × を押したあとはこの欄へフォーカスを戻す。
   const [editTags, setEditTags] = useState('')
-  const tagInputRef = useRef<HTMLTextAreaElement | null>(null)
+  // 入力欄は普段出さない。タグの並びの末尾の「＋」を押したときだけ出す。
+  const [addingTag, setAddingTag] = useState(false)
   const [savingTags, setSavingTags] = useState(false)
   const [savingName, setSavingName] = useState(false)
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
@@ -135,6 +135,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     setEditName(image.display_name)
     setEditingTitle(false)
     setEditTags('')
+    setAddingTag(false)
     setColumns(6)
     setRows(4)
     setError(null)
@@ -218,11 +219,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   }
 
   // チップの × を押したとき: そのタグをこの画像から外す。
-  // × ボタンはチップごと消えるのでフォーカスも消える。入力欄に戻して続けて入力できるようにする。
   const removeTag = async (name: string) => {
     if (selection?.kind !== 'image' || savingTags) return
     await saveTags(selection.image, selection.image.tags.filter((t) => t !== name))
-    tagInputRef.current?.focus()
   }
 
   // 「この画像でパズルを作成する」: 従来のピース数決定画面（mode:'create'）へ進む。
@@ -453,53 +452,68 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                   <span className="edit-label">タグ</span>
                   {canEditName ? (
                     <>
-                      {/* いまこの画像に実際に付いている（保存済みの）タグ。× で1つずつ外せる。 */}
-                      {selection.image.tags.length === 0 ? (
-                        <span className="muted">（なし）</span>
-                      ) : (
-                        <div className="grid-chips">
-                          {selection.image.tags.map((t) => (
-                            <span key={t} className="grid-chip tag-chip">
-                              {t}
-                              <button
-                                type="button"
-                                className="tag-remove"
-                                onClick={() => void removeTag(t)}
-                                disabled={savingTags}
-                                title="このタグを外す"
-                                aria-label={`タグ「${t}」を外す`}
-                              >
-                                <X size={12} />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
+                      {/* いまこの画像に実際に付いている（保存済みの）タグ。× で1つずつ外せる。
+                          末尾の「＋」を押すと入力欄が出る。 */}
+                      <div className="grid-chips">
+                        {selection.image.tags.map((t) => (
+                          <span key={t} className="grid-chip tag-chip">
+                            {t}
+                            <button
+                              type="button"
+                              className="tag-remove"
+                              onClick={() => void removeTag(t)}
+                              disabled={savingTags}
+                              title="このタグを外す"
+                              aria-label={`タグ「${t}」を外す`}
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))}
+                        {!addingTag && (
+                          <button
+                            type="button"
+                            className="grid-chip tag-add"
+                            onClick={() => { setEditTags(''); setAddingTag(true) }}
+                            title="タグを追加"
+                            aria-label="タグを追加"
+                          >
+                            +
+                          </button>
+                        )}
+                      </div>
+                      {/* 入力して Enter で1つのタグとして付ける（入力欄は空に戻り、続けて入力できる）。
+                          Esc か、他をクリックして外れたときは入力欄を閉じる。 */}
+                      {addingTag && (
+                        <textarea
+                          className="edit-title"
+                          value={editTags}
+                          maxLength={MAX_TAG_LENGTH}
+                          rows={2}
+                          autoFocus
+                          placeholder="タグ名を入力して Enter"
+                          onChange={(e) => setEditTags(e.target.value)}
+                          onBlur={() => { setAddingTag(false); setEditTags('') }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              e.preventDefault()
+                              setAddingTag(false)
+                              setEditTags('')
+                              return
+                            }
+                            // 日本語入力の変換確定 Enter は拾わない。
+                            if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                            e.preventDefault()
+                            void addTag()
+                          }}
+                        />
                       )}
-                      {/* 入力して Enter で1つのタグとして付ける（入力欄はそのつど空に戻る）。
-                          保存中も disabled にしない: フォーカスが外れて続けて入力できなくなるため。 */}
-                      <textarea
-                        ref={tagInputRef}
-                        className="edit-title"
-                        value={editTags}
-                        maxLength={MAX_TAG_LENGTH}
-                        rows={2}
-                        placeholder="タグ名を入力して Enter"
-                        onChange={(e) => setEditTags(e.target.value)}
-                        onKeyDown={(e) => {
-                          // 日本語入力の変換確定 Enter は拾わない。
-                          if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
-                          e.preventDefault()
-                          void addTag()
-                        }}
-                      />
                     </>
-                  ) : selection.image.tags.length === 0 ? (
-                    <span className="muted">（なし）</span>
-                  ) : (
+                  ) : selection.image.tags.length > 0 ? (
                     <div className="grid-chips">
                       {selection.image.tags.map((t) => <span key={t} className="grid-chip">{t}</span>)}
                     </div>
-                  )}
+                  ) : null}
                 </div>
                 {nameSavedNotice && <div className="muted">変更しました。</div>}
                 {error && <div className="error">{error}</div>}

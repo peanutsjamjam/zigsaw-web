@@ -367,6 +367,9 @@
   cursor: pointer;
 }
 .tag-remove:hover:not(:disabled) { color: var(--danger); }
+/* タグを追加するための「＋」チップ。押すと入力欄が出る。 */
+.tag-add { font: inherit; font-size: 13px; line-height: 1.4; color: var(--muted); cursor: pointer; }
+.tag-add:hover { color: var(--text); border-color: var(--accent); }
 .tag-remove:disabled { cursor: default; opacity: 0.5; }
 /* いま選んでいるピース数と一致するパズルを枠で強調する。 */
 .grid-chip.current {
