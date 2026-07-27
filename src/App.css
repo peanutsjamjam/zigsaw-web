@@ -77,6 +77,14 @@
   align-items: center;
   gap: 16px;
 }
+/* 上段を畳んだときは、区切り線がタイトル行のすぐ下に来るよう余白を詰める。 */
+.setup-head.collapsed { padding-bottom: 8px; gap: 8px; }
+/* 上段を畳む／開くボタン（三角）。区切り線のすぐ上（畳んだときはすぐ下）の右端に置く。 */
+.head-toggle { align-self: flex-end; width: 28px; height: 22px; }
+.head-toggle .flip { transform: rotate(180deg); }   /* 開くときは下向き三角 */
+/* 畳んでいるときのボタンは、一覧をスクロールしても区切り線のすぐ下に残す。 */
+.lists-toggle { position: sticky; top: 0; z-index: 2; }
+
 /* 下段: 各一覧。区切り線を上に置き、この領域だけを縦スクロールさせる。 */
 .setup-lists {
   flex: 1 1 auto;

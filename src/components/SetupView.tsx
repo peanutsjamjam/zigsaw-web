@@ -3,7 +3,7 @@
 //   「パズル一覧」  … 作成済みの共有パズル。誰でもプレイできる（未ログインはこの欄のみ）。
 //   「プレイしたパズル」… ログイン中の自分が遊んだパズル（プレイ中／クリア済み）。再開・再挑戦する。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FlaskConical, Plus, Trash2, Upload, X } from 'lucide-react'
+import { FlaskConical, Plus, Trash2, Triangle, Upload, X } from 'lucide-react'
 import { api, type Account, type GalleryImage, type ProgressItem, type Puzzle } from '../api'
 import { prepareUpload } from '../lib/generator'
 import type { SavedProgress } from '../api'
@@ -116,6 +116,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [filter, setFilter] = useState<Filter | null>(null)
   // 画像一覧のページ（1始まり）。
   const [imagePage, setImagePage] = useState(1)
+  // 上段（タイトル下の詳細・プレビュー）を畳んでいるか。畳むと区切り線がタイトルのすぐ下に来る。
+  const [headCollapsed, setHeadCollapsed] = useState(false)
   // プレイ中パズルの画像エリアのタブ（完成図 / 現在の様子）。既定は「現在の様子」。
   const [puzzleTab, setPuzzleTab] = useState<'finished' | 'current'>('current')
   // 「現在の様子」スナップショットは一覧に含まれないので、詳細を開いたとき progress id ごとに
@@ -142,6 +144,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   }, [account])
 
   useEffect(() => { void reload() }, [reload])
+
+  // 何かを選んだら（＝上段に詳細が出るとき）、畳んでいても開く。
+  useEffect(() => { if (selection) setHeadCollapsed(false) }, [selection])
 
   // puzzle_id ごとの途中経過（状態バッジ・再開に使う）。
   const progressByPuzzle = useMemo(() => {
@@ -409,7 +414,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       {createdNotice && <div className="toast">パズルを作成しました</div>}
 
       {/* 上段: タイトル＋選択中の詳細（常に見える。スクロールしない）。 */}
-      <div className="setup-head">
+      <div className={`setup-head${headCollapsed ? ' collapsed' : ''}`}>
       <div className="setup-top">
         <h1 className="setup-title">
           {selection && <img className="title-shape" src={SHAPE_IMAGES.PlaceholderShape002} alt="" />}
@@ -435,7 +440,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       {/* 何かを選んでいるあいだは、プレビュー＋操作ボタンをまとめて枠で囲み、
           右上の × で選択を解除して最初の画面（どの項目も未選択）に戻れるようにする。
           未選択のときは、歩くピースのプレースホルダーだけを枠なしで出す。 */}
-      {selection ? (
+      {!headCollapsed && (selection ? (
         <div className="selection-box">
           <button type="button" className="selection-close" onClick={() => setSelection(null)} aria-label="閉じる" title="閉じる">
             <X size={18} />
@@ -828,11 +833,38 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
         <div className="preview-row">
           <PreviewBox url={undefined} />
         </div>
+      ))}
+
+      {/* 上段を畳むボタン。区切り線のすぐ上・右端に置く。 */}
+      {!headCollapsed && (
+        <button
+          type="button"
+          className="icon-btn head-toggle"
+          onClick={() => setHeadCollapsed(true)}
+          title="上の領域を畳む"
+          aria-label="上の領域を畳む"
+          aria-expanded={true}
+        >
+          <Triangle size={14} fill="currentColor" />
+        </button>
       )}
       </div>
 
       {/* 下段: 各一覧。ここだけを縦スクロールさせ、上段の詳細が常に見えるようにする。 */}
       <div className="setup-lists">
+      {/* 畳んでいるときの戻すボタン。区切り線のすぐ下・右端に置く。 */}
+      {headCollapsed && (
+        <button
+          type="button"
+          className="icon-btn head-toggle lists-toggle"
+          onClick={() => setHeadCollapsed(false)}
+          title="上の領域を開く"
+          aria-label="上の領域を開く"
+          aria-expanded={false}
+        >
+          <Triangle size={14} fill="currentColor" className="flip" />
+        </button>
+      )}
       {error && <div className="error">{error}</div>}
 
       {/* タグ一覧。押すと、そのタグが付いた画像と、その画像から作られたパズルだけを出す。
