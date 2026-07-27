@@ -38,6 +38,7 @@ export type Puzzle = {
   creator: string | null   // 作成者名。退会済みは null
   mine: boolean            // ログイン中の自分が作成したパズルか
   play_count: number       // このパズルの進行状況の数（＝プレイ中／クリア済みの人数）
+  tags: string[]           // もとの画像に付いているタグ（タグでの絞り込みに使う）
   display_name: string     // もとの画像の題名（タイトル）
   original_name: string    // もとの画像のファイル名
   width: number

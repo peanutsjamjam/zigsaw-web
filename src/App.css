@@ -340,6 +340,20 @@
   border-radius: 999px;
   background: var(--panel-2);
 }
+/* タグ一覧（絞り込み）。押したタグの画像・パズルだけを一覧に出す。 */
+.tag-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-filter {
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.tag-filter:hover { border-color: var(--accent); }
+.tag-filter.selected { background: var(--accent); border-color: transparent; color: #fff; }
 /* タグのチップ。右の × でその画像からタグを外す。 */
 .tag-chip { display: inline-flex; align-items: center; gap: 5px; padding-right: 5px; }
 .tag-remove {

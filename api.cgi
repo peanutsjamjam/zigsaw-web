@@ -464,11 +464,14 @@ sub write_file {
 }
 
 # ---- タグ（tags / image_tags の多対多） ------------------------------------
-# 画像行（の配列）に、その画像に付いているタグ名を名前順の配列で載せる。
-# 画像1件ごとに引くと件数ぶん問い合わせが増えるので、まとめて1回で引く。
+# 行（の配列）に、その画像に付いているタグ名を名前順の配列で載せる。
+# $key はその行のどの列が画像 id かで、画像行なら 'id'、パズル行なら 'image_id'。
+# 1件ごとに引くと件数ぶん問い合わせが増えるので、まとめて1回で引く。
 sub attach_tags {
-    my ($dbh, $rows) = @_;
-    my @ids = map { $_->{id} } @$rows;
+    my ($dbh, $rows, $key) = @_;
+    $key ||= 'id';
+    my %uniq = map { $_->{$key} => 1 } @$rows;
+    my @ids = keys %uniq;
     return $rows unless @ids;
     my $ph = join ',', ('?') x @ids;
     my $pairs = $dbh->selectall_arrayref(
@@ -479,7 +482,7 @@ sub attach_tags {
     );
     my %by_image;
     push @{ $by_image{ $_->{image_id} } }, $_->{name} for @$pairs;
-    $_->{tags} = $by_image{ $_->{id} } || [] for @$rows;
+    $_->{tags} = $by_image{ $_->{$key} } || [] for @$rows;
     return $rows;
 }
 
@@ -566,6 +569,7 @@ sub puzzle_row_to_json {
         creator       => $row->{creator_username},   # 作成者名（退会済みは null）
         mine          => $row->{mine} ? JSON::PP::true : JSON::PP::false,   # 作成者が自分か
         play_count    => 0 + ($row->{play_count} // 0),   # このパズルの進行状況の数（プレイ中の人数）
+        tags          => $row->{tags} || [],        # 元画像に付いているタグ（タグでの絞り込みに使う）
         display_name  => $row->{display_name},
         original_name => $row->{original_name},
         width         => 0 + $row->{width},
@@ -917,6 +921,7 @@ eval {
               WHERE pr.user_id = ? ORDER BY pr.updated_at DESC',
             { Slice => {} }, $uid
         );
+        attach_tags($dbh, $prog_rows, 'image_id');
         my @progress = map {
             {
                 id         => 0 + $_->{id},
@@ -930,7 +935,7 @@ eval {
 
         respond({
             images   => [ map { image_row_to_json($base, $_) } @{ attach_tags($dbh, $img_rows) } ],
-            puzzles  => [ map { puzzle_row_to_json($base, $_) } @$puz_rows ],
+            puzzles  => [ map { puzzle_row_to_json($base, $_) } @{ attach_tags($dbh, $puz_rows, 'image_id') } ],
             progress => \@progress,
         });
     }
@@ -1066,6 +1071,7 @@ eval {
             { Slice => {} }, $uid
         );
         my $base = app_base_url();
+        attach_tags($dbh, $rows, 'image_id');
         respond({ puzzles => [ map { puzzle_row_to_json($base, $_) } @$rows ] });
     }
     elsif ($action eq 'puzzle' && $method eq 'POST') {
@@ -1096,6 +1102,7 @@ eval {
               WHERE p.image_id = ? AND p.columns = ? AND p.rows = ?',
             undef, $u->{id}, $image_id, $columns, $rows
         );
+        attach_tags($dbh, [$row], 'image_id');
         respond({ puzzle => puzzle_row_to_json(app_base_url(), $row) }, '201 Created');
     }
     elsif ($action eq 'puzzle' && $method eq 'DELETE') {
@@ -1129,6 +1136,7 @@ eval {
             { Slice => {} }, $u->{id}
         );
         my $base = app_base_url();
+        attach_tags($dbh, $rows, 'image_id');   # 各パズルの元画像のタグ
         my @out;
         for my $r (@$rows) {
             my $state = eval { $JSON->decode($r->{state}) } || {};   # JSONB は文字列で来る

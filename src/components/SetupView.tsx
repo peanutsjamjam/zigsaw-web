@@ -74,6 +74,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [savingTags, setSavingTags] = useState(false)
   const [savingName, setSavingName] = useState(false)
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
+  // タグでの絞り込み。null なら絞り込まない（「すべて」）。
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
   // プレイ中パズルの画像エリアのタブ（完成図 / 現在の様子）。既定は「現在の様子」。
   const [puzzleTab, setPuzzleTab] = useState<'finished' | 'current'>('current')
   // 「現在の様子」スナップショットは一覧に含まれないので、詳細を開いたとき progress id ごとに
@@ -107,6 +109,25 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     for (const p of progress) map.set(p.puzzle_id, p)
     return map
   }, [progress])
+
+  // 使われているタグの一覧（画像・パズルのどちらに付いているものも集める）。名前順。
+  // 未ログインだと画像一覧は取れないので、パズル側のタグも合わせて拾う。
+  const allTags = useMemo(() => {
+    const names = new Set<string>()
+    for (const image of images) for (const t of image.tags) names.add(t)
+    for (const puzzle of puzzles) for (const t of puzzle.tags) names.add(t)
+    return [...names].sort((a, b) => a.localeCompare(b, 'ja'))
+  }, [images, puzzles])
+
+  // タグで絞り込んだ画像・パズル（「プレイしたパズル」は絞り込まない）。
+  const visibleImages = useMemo(
+    () => (tagFilter === null ? images : images.filter((i) => i.tags.includes(tagFilter))),
+    [images, tagFilter],
+  )
+  const visiblePuzzles = useMemo(
+    () => (tagFilter === null ? puzzles : puzzles.filter((p) => p.tags.includes(tagFilter))),
+    [puzzles, tagFilter],
+  )
 
   // 画像を選んだら、まず画像情報の修正画面（mode:'edit'）を出す。
   const selectImage = (image: GalleryImage) => {
@@ -726,11 +747,43 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       <div className="setup-lists">
       {error && <div className="error">{error}</div>}
 
+      {/* タグ一覧。押すと、そのタグが付いた画像と、その画像から作られたパズルだけを出す。
+          もう一度押すか「すべて」で絞り込みを解除する（「プレイしたパズル」は絞り込まない）。 */}
+      {allTags.length > 0 && (
+        <Section title="タグ一覧" empty={false} emptyText="">
+          <div className="tag-filters">
+            <button
+              type="button"
+              className={`tag-filter${tagFilter === null ? ' selected' : ''}`}
+              onClick={() => setTagFilter(null)}
+            >
+              すべて
+            </button>
+            {allTags.map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`tag-filter${tagFilter === t ? ' selected' : ''}`}
+                onClick={() => setTagFilter((cur) => (cur === t ? null : t))}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {/* 画像一覧（要ログイン） */}
       {account && (
-        <Section title="画像一覧" empty={!loading && images.length === 0} emptyText="まだ画像がありません。右のカードから画像をアップロードできます。">
+        <Section
+          title={tagFilter === null ? '画像一覧' : `画像一覧（タグ: ${tagFilter}）`}
+          empty={!loading && visibleImages.length === 0}
+          emptyText={tagFilter === null
+            ? 'まだ画像がありません。右のカードから画像をアップロードできます。'
+            : 'このタグが付いた画像はありません。'}
+        >
           <div className="card-grid">
-            {images.map((image) => (
+            {visibleImages.map((image) => (
               <button
                 key={image.id}
                 type="button"
@@ -748,10 +801,14 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       )}
 
       {/* パズル一覧（常に表示） */}
-      <Section title="パズル一覧" empty={!loading && puzzles.length === 0}
-        emptyText={account ? '「画像一覧」から画像を選び、ピース数を決めてパズルを作成できます。' : 'まだパズルがありません。'}>
+      <Section
+        title={tagFilter === null ? 'パズル一覧' : `パズル一覧（タグ: ${tagFilter}）`}
+        empty={!loading && visiblePuzzles.length === 0}
+        emptyText={tagFilter !== null
+          ? 'このタグが付いた画像から作られたパズルはありません。'
+          : account ? '「画像一覧」から画像を選び、ピース数を決めてパズルを作成できます。' : 'まだパズルがありません。'}>
         <div className="card-grid">
-          {puzzles.map((puzzle) => (
+          {visiblePuzzles.map((puzzle) => (
             <button
               key={puzzle.id}
               type="button"
