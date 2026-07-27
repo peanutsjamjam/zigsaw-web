@@ -87,6 +87,10 @@ my $MAIL_MAX_PER_IP     = 10;
 # 実行環境名。api.cgi と同じディレクトリの env.pl（git 管理外。dev/本番で内容が異なる）を
 # require し、その中で $main::ZIGSAW_ENV を設定する。未設置なら 'unknown'。
 our $ZIGSAW_ENV = 'unknown';
+# アプリのベース URL（末尾スラッシュ付き。例 https://zigsaw.peanutsjamjam.jp/）。
+# env.pl で $main::ZIGSAW_BASE_URL に設定する。メール内リンク等の絶対 URL 生成に使い、
+# これがあると Host ヘッダに依存しない（＝リセットリンク等の Host インジェクションを防ぐ）。
+our $ZIGSAW_BASE_URL = '';
 {
     my $env_file = dirname(__FILE__) . '/env.pl';
     require $env_file if -f $env_file;
@@ -287,6 +291,15 @@ sub purge_expired_reset_tokens {
 # ---- メール ----------------------------------------------------------------
 # アプリのベース URL（api.cgi のあるディレクトリ）を、リクエストの host/scheme から組み立てる。
 sub app_base_url {
+    # 設定済みの固定ベース URL があれば最優先で使う。Host ヘッダに依存しないので、
+    # メール内リンク（サインアップ/リセット）の Host インジェクションを防げる。
+    if (defined $ZIGSAW_BASE_URL && $ZIGSAW_BASE_URL ne '') {
+        my $b = $ZIGSAW_BASE_URL;
+        $b .= '/' unless $b =~ m#/$#;   # 末尾スラッシュを保証
+        return $b;
+    }
+    # 未設定時のフォールバック（後方互換）。この経路は HTTP_HOST に依存するので、
+    # 本番/dev とも env.pl に ZIGSAW_BASE_URL を設定しておくこと。
     my $scheme = ($ENV{HTTPS} && lc $ENV{HTTPS} eq 'on') ? 'https'
                : ($ENV{REQUEST_SCHEME} || 'https');
     my $host = $ENV{HTTP_HOST} || 'localhost';
