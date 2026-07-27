@@ -27,7 +27,9 @@ export function AccountMenu({ account, onRequestLogin, onLoggedOut }: {
           <div className="account-menu">
             <div className="account-email">{account.email}</div>
             <button type="button" onClick={() => { setOpen(false); setDialog('password') }}>パスワードを変更</button>
-            <button type="button" onClick={async () => { setOpen(false); await api.logout(); onLoggedOut() }}>ログアウト</button>
+            {/* 楽観的ログアウト: サーバー応答を待たず先に画面を切り替え、logout は裏で投げる
+                （どのみちログアウトするので失敗は無視。セッションはサーバー側で消える）。 */}
+            <button type="button" onClick={() => { setOpen(false); void api.logout().catch(() => {}); onLoggedOut() }}>ログアウト</button>
             <button type="button" className="danger-text" onClick={() => { setOpen(false); setDialog('delete') }}>アカウントを削除</button>
           </div>
         </>
