@@ -43,14 +43,22 @@ use File::Basename qw(dirname);
 #   GET    ?action=dev_storage                      -> 画像ディレクトリの画像数/合計サイズ・FSの空き/総容量（開発環境のみ）
 #   GET    ?action=dev_users                        -> 全ユーザー一覧（開発環境のみ。本番は404。salt/iterations は返さない）
 #   GET    ?action=dev_user_detail&id=<uid>         -> 指定ユーザーの画像/パズル/保存ゲーム（開発環境のみ）
-#   GET    ?action=images                           -> アップロード画像一覧（未ログインでも可）
+#   GET    ?action=images[&page=&per_page=&tag=&mine=1&pieces_min=&pieces_max=]
+#                                                   -> アップロード画像一覧（未ログインでも可）。
+#                                                      {images,total,page,per_page}。絞り込み・
+#                                                      ページングはサーバー側で行う
+#   GET    ?action=image&id=<id>                    -> 画像1件（一覧に無い1件を引く用）
+#   GET    ?action=tags                             -> 使われているタグ名の一覧（誰でも）
 #   POST   ?action=image  {display_name,original_name,width,height,ext,full,thumb}
 #                                                   -> 画像アップロード（要ログイン。full/thumb は base64。
 #                                                      display_name=タイトル、original_name=ファイル名）
 #   PUT    ?action=image&id=<id>  {display_name,tags?}  -> display_name/タグを変更（本人または管理者。
 #                                                      tags はタグ名の配列。キーが無ければタグは変えない）
 #   DELETE ?action=image&id=<id>                    -> 画像削除（本人または管理者。パズル/進行も CASCADE 削除）
-#   GET    ?action=puzzles                          -> 作成済みパズル一覧（誰でも。画像情報+作成者名つき）
+#   GET    ?action=puzzles[&page=&per_page=&tag=&mine=1&pieces_min=&pieces_max=]
+#                                                   -> 作成済みパズル一覧（誰でも。画像情報+作成者名つき）。
+#                                                      {puzzles,total,page,per_page}
+#          ?action=puzzles&image_id=<id>            -> その画像のパズルを全件（ページングなし）
 #   POST   ?action=puzzle {image_id,columns,rows}   -> パズルを作成（同じ画像+グリッドは1つに束ねる。要ログイン）
 #   DELETE ?action=puzzle&id=<id>                   -> パズル削除（作成者/管理者。プレイ中の人がいると 409）
 #   GET    ?action=progress                         -> 自分の途中経過一覧（要ログイン。パズル+画像情報つき。
@@ -143,6 +151,9 @@ sub query_param {
         $v = '' unless defined $v;
         $v =~ tr/+/ /;
         $v =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/ge;
+        # %xx を戻した時点ではバイト列なので、UTF-8 として文字列に直す
+        # （タグ名など非 ASCII を DB と突き合わせるのに必要。壊れていればそのまま返す）。
+        utf8::decode($v);
         return $v;
     }
     return undef;
@@ -537,6 +548,57 @@ sub set_image_tags {
 sub purge_unused_tags {
     my ($dbh) = @_;
     $dbh->do('DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM image_tags it WHERE it.tag_id = tags.id)');
+}
+
+# ---- 一覧の絞り込みとページング --------------------------------------------
+# 一覧に効く絞り込みを、SQL の条件（WHERE に AND で足す）と束縛値にする。
+#   tag=<名前>           … そのタグが付いた画像／その画像から作られたパズル
+#   mine=1               … 自分がアップロードした画像／その画像から作られたパズル
+#   pieces_min/pieces_max… ピース数がその範囲のパズル／そのパズルを持つ 画像
+# $image_col は「その問い合わせで画像 id を指す式」（画像一覧なら i.id、パズル一覧なら p.image_id）。
+sub list_filters {
+    my ($image_col, $uid, $piece_expr) = @_;
+    my (@where, @bind);
+
+    my $tag = query_param('tag');
+    if (defined $tag && $tag ne '') {
+        push @where, "EXISTS (SELECT 1 FROM image_tags it JOIN tags t ON t.id = it.tag_id
+                               WHERE it.image_id = $image_col AND t.name = ?)";
+        push @bind, $tag;
+    }
+
+    my $mine = query_param('mine');
+    if (defined $mine && $mine eq '1') {
+        push @where, "EXISTS (SELECT 1 FROM images mi WHERE mi.id = $image_col AND mi.owner_id = ?)";
+        push @bind, $uid;
+    }
+
+    my $min = query_param('pieces_min');
+    my $max = query_param('pieces_max');
+    if (defined $min && $min ne '') {
+        # パズル一覧では、そのパズル自身のピース数（$piece_expr を渡す）で判定する。
+        # 画像一覧では「その範囲のパズルを持っている画像か」を EXISTS で判定する。
+        my $expr = $piece_expr || 'pz.columns * pz.rows';
+        my $cond = "$expr >= ?";
+        my @b = (int($min));
+        if (defined $max && $max ne '') { $cond .= " AND $expr <= ?"; push @b, int($max); }
+        push @where, $piece_expr ? "($cond)"
+                   : "EXISTS (SELECT 1 FROM puzzles pz WHERE pz.image_id = $image_col AND $cond)";
+        push @bind, @b;
+    }
+
+    my $sql = @where ? ' AND ' . join(' AND ', @where) : '';
+    return ($sql, \@bind);
+}
+
+# page / per_page を読んで (LIMIT, OFFSET) にする。per_page は 1〜200 に丸める。
+sub list_paging {
+    my $per_page = int(query_param('per_page') || 0);
+    $per_page = 30  if $per_page < 1;
+    $per_page = 200 if $per_page > 200;
+    my $page = int(query_param('page') || 1);
+    $page = 1 if $page < 1;
+    return ($per_page, ($page - 1) * $per_page, $page);
 }
 
 # 画像1行を、フロントが使いやすい形（URL 付き）に整える。
@@ -941,19 +1003,54 @@ eval {
     }
     elsif ($action eq 'images' && $method eq 'GET') {
         # ギャラリー一覧。未ログインでも見られる（遊べる）。ログイン中なら mine を立てる。
+        # 全件返すと件数ぶん際限なく重くなるので、絞り込みとページングはここ（SQL）で行い、
+        # 総件数（total）も返してフロントのページ送りに使う。
         my $u = current_user($dbh);
         my $uid = $u ? $u->{id} : -1;
+        my ($cond, $bind) = list_filters('i.id', $uid);
+        my ($per_page, $offset, $page) = list_paging();
+        my $total = $dbh->selectrow_array(
+            "SELECT count(*) FROM images i WHERE true $cond", undef, @$bind
+        );
         my $rows = $dbh->selectall_arrayref(
-            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at, host(i.upload_ip) AS upload_ip,
+            "SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at, host(i.upload_ip) AS upload_ip,
                     ou.username AS owner_username,
                     (i.owner_id = ?) AS mine
                FROM images i
                LEFT JOIN users ou ON ou.id = i.owner_id
-              ORDER BY i.created_at DESC, i.id DESC',
-            { Slice => {} }, $uid
+              WHERE true $cond
+              ORDER BY i.created_at DESC, i.id DESC
+              LIMIT ? OFFSET ?",
+            { Slice => {} }, $uid, @$bind, $per_page, $offset
         );
         my $base = app_base_url();
-        respond({ images => [ map { image_row_to_json($base, $_) } @{ attach_tags($dbh, $rows) } ] });
+        respond({
+            images   => [ map { image_row_to_json($base, $_) } @{ attach_tags($dbh, $rows) } ],
+            total    => 0 + $total,
+            page     => 0 + $page,
+            per_page => 0 + $per_page,
+        });
+    }
+    elsif ($action eq 'image' && $method eq 'GET') {
+        # 画像1件。パズル情報画面から元画像へ移るときなど、一覧に無い1件を引くのに使う。
+        my $u = current_user($dbh);
+        my $uid = $u ? $u->{id} : -1;
+        my $id = int(query_param('id') || 0);
+        my $row = $dbh->selectrow_hashref(
+            'SELECT i.id, i.basename, i.ext, i.display_name, i.original_name, i.width, i.height, i.created_at, host(i.upload_ip) AS upload_ip,
+                    ou.username AS owner_username, (i.owner_id = ?) AS mine
+               FROM images i LEFT JOIN users ou ON ou.id = i.owner_id WHERE i.id = ?',
+            undef, $uid, $id
+        );
+        fail('not_found', '404 Not Found') unless $row;
+        attach_tags($dbh, [$row]);
+        respond({ image => image_row_to_json(app_base_url(), $row) });
+    }
+    elsif ($action eq 'tags' && $method eq 'GET') {
+        # 使われているタグの名前一覧（絞り込みのタグ一覧に使う。誰でも見られる）。
+        # 参照されなくなったタグ行は消しているので、tags の中身がそのまま「使われているタグ」。
+        my $rows = $dbh->selectcol_arrayref('SELECT name FROM tags ORDER BY name');
+        respond({ tags => $rows });
     }
     elsif ($action eq 'image' && $method eq 'POST') {
         my $u = require_user($dbh);
@@ -1057,22 +1154,43 @@ eval {
     elsif ($action eq 'puzzles' && $method eq 'GET') {
         # 作成済みパズルの一覧（誰でも見られる）。新しい順。
         # mine=作成者が自分か、play_count=そのパズルの進行状況（＝プレイ中/クリア済みの人）の数。
+        # 画像一覧と同様、絞り込みとページングは SQL で行い total を返す。
+        # ただし image_id 指定のとき（画像情報画面の「作成済みのパズル」）は、その画像ぶんを全件返す。
         my $u = current_user($dbh);
         my $uid = $u ? $u->{id} : -1;
+        my $image_id = int(query_param('image_id') || 0);
+        my ($cond, $bind, $per_page, $offset, $page);
+        if ($image_id > 0) {
+            ($cond, $bind) = (' AND p.image_id = ?', [$image_id]);
+            ($per_page, $offset, $page) = (200, 0, 1);
+        } else {
+            ($cond, $bind) = list_filters('p.image_id', $uid, 'p.columns * p.rows');
+            ($per_page, $offset, $page) = list_paging();
+        }
+        my $total = $dbh->selectrow_array(
+            "SELECT count(*) FROM puzzles p WHERE true $cond", undef, @$bind
+        );
         my $rows = $dbh->selectall_arrayref(
-            'SELECT p.id, p.image_id, p.columns, p.rows,
+            "SELECT p.id, p.image_id, p.columns, p.rows,
                     cu.username AS creator_username, (p.creator_id = ?) AS mine,
                     (SELECT count(*) FROM progress pr WHERE pr.puzzle_id = p.id) AS play_count,
                     i.basename, i.ext, i.display_name, i.original_name, i.width, i.height
                FROM puzzles p
                JOIN images i ON i.id = p.image_id
                LEFT JOIN users cu ON cu.id = p.creator_id
-              ORDER BY p.created_at DESC, p.id DESC',
-            { Slice => {} }, $uid
+              WHERE true $cond
+              ORDER BY p.created_at DESC, p.id DESC
+              LIMIT ? OFFSET ?",
+            { Slice => {} }, $uid, @$bind, $per_page, $offset
         );
         my $base = app_base_url();
         attach_tags($dbh, $rows, 'image_id');
-        respond({ puzzles => [ map { puzzle_row_to_json($base, $_) } @$rows ] });
+        respond({
+            puzzles  => [ map { puzzle_row_to_json($base, $_) } @$rows ],
+            total    => 0 + $total,
+            page     => 0 + $page,
+            per_page => 0 + $per_page,
+        });
     }
     elsif ($action eq 'puzzle' && $method eq 'POST') {
         # パズルを作成する（要ログイン）。同じ画像＋グリッドがあればそれを返す（束ねる）。

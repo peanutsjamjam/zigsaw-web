@@ -4,7 +4,7 @@
 //   「プレイしたパズル」… ログイン中の自分が遊んだパズル（プレイ中／クリア済み）。再開・再挑戦する。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlaskConical, Plus, Trash2, Triangle, Upload, X } from 'lucide-react'
-import { api, type Account, type GalleryImage, type ProgressItem, type Puzzle } from '../api'
+import { api, type Account, type GalleryImage, type ListFilter, type ProgressItem, type Puzzle } from '../api'
 import { prepareUpload } from '../lib/generator'
 import type { SavedProgress } from '../api'
 import { PLACEHOLDER_WALK_FRAMES, SHAPE_IMAGES } from '../lib/shapes'
@@ -65,12 +65,6 @@ const PIECE_RANGES: { label: string; min: number; max: number | null }[] = [
   { label: '401〜ピース', min: 401, max: null },
 ]
 
-/** パズルのピース数が、その仮想タグの範囲に入るか。 */
-function inPieceRange(puzzle: Puzzle, range: { min: number; max: number | null }): boolean {
-  const pieces = puzzle.columns * puzzle.rows
-  return pieces >= range.min && (range.max === null || pieces <= range.max)
-}
-
 /** 絞り込みを見分けるための文字列（チップの選択状態の比較に使う）。 */
 function filterKey(filter: Filter): string {
   return filter.kind === 'tag' ? `tag:${filter.name}` : filter.kind === 'mine' ? 'mine' : `pieces:${filter.label}`
@@ -82,9 +76,21 @@ function filterLabel(filter: Filter): string {
 }
 
 export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, onLoggedOut, busy }: Props) {
+  // images / puzzles は「いま表示しているページのぶんだけ」。総件数は total で持つ。
   const [images, setImages] = useState<GalleryImage[]>([])
+  const [imagesTotal, setImagesTotal] = useState(0)
   const [puzzles, setPuzzles] = useState<Puzzle[]>([])
+  const [puzzlesTotal, setPuzzlesTotal] = useState(0)
   const [progress, setProgress] = useState<ProgressItem[]>([])
+  // 絞り込みに使うタグ名の一覧（サーバーから。一覧のページに依らず全部）。
+  const [allTags, setAllTags] = useState<string[]>([])
+  // 選択中の画像で作成済みのパズル（一覧のページに関係なく、その画像ぶんを取得する）。
+  const [puzzlesForSelectedImage, setPuzzlesForSelectedImage] = useState<Puzzle[]>([])
+  // 一覧を取り直すたびに増やす印。これが変わったら上のパズルも引き直す
+  // （絞り込み中はパズルを作っても総数が動かないことがあるため、総数では足りない）。
+  const [listVersion, setListVersion] = useState(0)
+  // 選択中パズルの元画像（画像一覧の今のページに無くても引けるよう、id で取得する）。
+  const [imageForSelectedPuzzle, setImageForSelectedPuzzle] = useState<GalleryImage | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [columns, setColumns] = useState(6)
   const [rows, setRows] = useState(4)
@@ -125,26 +131,58 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   // 個別取得してここにキャッシュする。値 undefined=未取得, null=保存なし, string=data URL。
   const [snapshotById, setSnapshotById] = useState<Record<number, string | null>>({})
 
-  const reload = useCallback(async () => {
+  // 絞り込みを、サーバーに渡す形（クエリパラメータのもと）に直す。
+  const listFilter = useMemo<ListFilter | undefined>(() => {
+    if (filter === null) return undefined
+    if (filter.kind === 'tag') return { tag: filter.name }
+    if (filter.kind === 'mine') return { mine: true }
+    return { piecesMin: filter.min, ...(filter.max === null ? {} : { piecesMax: filter.max }) }
+  }, [filter])
+
+  // 一覧（画像・パズル）。ページと絞り込みが変わるたびに、そのページぶんだけ取り直す。
+  const loadLists = useCallback(async () => {
     setLoading(true)
     try {
-      const [imgs, puz, prog] = await Promise.all([
-        account ? api.images() : Promise.resolve([] as GalleryImage[]),
-        api.puzzles(),
-        account ? api.progress() : Promise.resolve([] as ProgressItem[]),
+      const [imgs, puz] = await Promise.all([
+        account
+          ? api.images(imagePage, LIST_PER_PAGE, listFilter)
+          : Promise.resolve({ images: [] as GalleryImage[], total: 0 }),
+        api.puzzles(puzzlePage, LIST_PER_PAGE, listFilter),
       ])
-      setImages(imgs)
-      setPuzzles(puz)
-      setProgress(prog)
-      setSnapshotById({})   // progress を読み直したら snapshot キャッシュは破棄する
+      setImages(imgs.images)
+      setImagesTotal(imgs.total)
+      setPuzzles(puz.puzzles)
+      setPuzzlesTotal(puz.total)
+      setListVersion((v) => v + 1)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
+  }, [account, imagePage, puzzlePage, listFilter])
+
+  // ページに依らないもの（タグ一覧と自分の途中経過）。
+  const loadMeta = useCallback(async () => {
+    try {
+      const [tags, prog] = await Promise.all([
+        api.tags(),
+        account ? api.progress() : Promise.resolve([] as ProgressItem[]),
+      ])
+      setAllTags(tags)
+      setProgress(prog)
+      setSnapshotById({})   // progress を読み直したら snapshot キャッシュは破棄する
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
   }, [account])
 
-  useEffect(() => { void reload() }, [reload])
+  // 何かを作った・消したあとに、全部まとめて取り直す。
+  const reload = useCallback(async () => {
+    await Promise.all([loadLists(), loadMeta()])
+  }, [loadLists, loadMeta])
+
+  useEffect(() => { void loadLists() }, [loadLists])
+  useEffect(() => { void loadMeta() }, [loadMeta])
 
   // 何かを選んだら（＝上段に詳細が出るとき）、畳んでいても開く。
   useEffect(() => { if (selection) setHeadCollapsed(false) }, [selection])
@@ -156,15 +194,6 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     return map
   }, [progress])
 
-  // 使われているタグの一覧（画像・パズルのどちらに付いているものも集める）。名前順。
-  // 未ログインだと画像一覧は取れないので、パズル側のタグも合わせて拾う。
-  const allTags = useMemo(() => {
-    const names = new Set<string>()
-    for (const image of images) for (const t of image.tags) names.add(t)
-    for (const puzzle of puzzles) for (const t of puzzle.tags) names.add(t)
-    return [...names].sort((a, b) => a.localeCompare(b, 'ja'))
-  }, [images, puzzles])
-
   // 仮想タグの並び。「自分の画像」はログイン中だけ出す。
   const virtualFilters = useMemo<Filter[]>(
     () => [
@@ -174,28 +203,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     [account],
   )
 
-  // 自分がアップロードした画像の id（仮想タグ「自分の画像」でパズルを絞るのに使う。
-  // パズル JSON の mine は「作成者が自分か」なので、画像の持ち主とは別物）。
-  const myImageIds = useMemo(
-    () => new Set(images.filter((i) => i.mine).map((i) => i.id)),
-    [images],
-  )
-
-  // タグ・仮想タグで絞り込んだ画像・パズル（「プレイしたパズル」は絞り込まない）。
-  // ピース数の仮想タグでは、画像一覧はその範囲のパズルを持つ画像だけになる。
-  const visibleImages = useMemo(() => {
-    if (filter === null) return images
-    if (filter.kind === 'tag') return images.filter((i) => i.tags.includes(filter.name))
-    if (filter.kind === 'mine') return images.filter((i) => i.mine)
-    return images.filter((i) => puzzles.some((p) => p.image_id === i.id && inPieceRange(p, filter)))
-  }, [images, puzzles, filter])
-
-  const visiblePuzzles = useMemo(() => {
-    if (filter === null) return puzzles
-    if (filter.kind === 'tag') return puzzles.filter((p) => p.tags.includes(filter.name))
-    if (filter.kind === 'mine') return puzzles.filter((p) => myImageIds.has(p.image_id))
-    return puzzles.filter((p) => inPieceRange(p, filter))
-  }, [puzzles, myImageIds, filter])
+  // 絞り込み（タグ・仮想タグ）はサーバー側の SQL で行うので、ここでは絞り込まない。
+  // 「プレイしたパズル」は絞り込みの対象外で、常に自分のぶんを全部出す。
 
   // プレースホルダーのスライドショーに映せる画像（サムネ）。未ログインだと画像一覧は
   // 取れないので、パズル側の画像も合わせて拾う（同じ画像は1つにまとめる）。
@@ -206,10 +215,10 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     return [...byImage.values()]
   }, [images, puzzles])
 
-  // 画像一覧・パズル一覧のページ分け。絞り込みを変えたら1ページ目に戻し、
+  // ページ数はサーバーが返す総件数から出す。絞り込みを変えたら1ページ目に戻し、
   // 件数が減ってページ数を超えたら最後のページに寄せる。
-  const imagePageCount = Math.max(1, Math.ceil(visibleImages.length / LIST_PER_PAGE))
-  const puzzlePageCount = Math.max(1, Math.ceil(visiblePuzzles.length / LIST_PER_PAGE))
+  const imagePageCount = Math.max(1, Math.ceil(imagesTotal / LIST_PER_PAGE))
+  const puzzlePageCount = Math.max(1, Math.ceil(puzzlesTotal / LIST_PER_PAGE))
   useEffect(() => { setImagePage(1); setPuzzlePage(1) }, [filter])
   useEffect(() => {
     setImagePage((cur) => Math.min(cur, imagePageCount))
@@ -217,14 +226,6 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   useEffect(() => {
     setPuzzlePage((cur) => Math.min(cur, puzzlePageCount))
   }, [puzzlePageCount])
-  const pagedImages = useMemo(
-    () => visibleImages.slice((imagePage - 1) * LIST_PER_PAGE, imagePage * LIST_PER_PAGE),
-    [visibleImages, imagePage],
-  )
-  const pagedPuzzles = useMemo(
-    () => visiblePuzzles.slice((puzzlePage - 1) * LIST_PER_PAGE, puzzlePage * LIST_PER_PAGE),
-    [visiblePuzzles, puzzlePage],
-  )
 
   // 画像を選んだら、まず画像情報の修正画面（mode:'edit'）を出す。
   const selectImage = (image: GalleryImage) => {
@@ -293,6 +294,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       setSelection({ kind: 'image', image: updated, mode: 'edit' })
       // 一覧の該当画像も差し替える（一覧ぜんぶを読み直すほどの変更ではない）。
       setImages((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+      void loadMeta()   // タグ一覧に新しい名前が増える／使われなくなることがある
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -329,13 +331,19 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   }
 
   // いま選んでいる画像で、すでに作成済みのパズル（ピース数の少ない順）。
-  const puzzlesForSelectedImage = useMemo(() => {
-    if (selection?.kind !== 'image') return []
-    const imageId = selection.image.id
-    return puzzles
-      .filter((p) => p.image_id === imageId)
-      .sort((a, b) => a.columns * a.rows - b.columns * b.rows)
-  }, [puzzles, selection])
+  // 一覧はページ分けされていて全部は手元に無いので、その画像ぶんを個別に取得する。
+  const selectedImageId = selection?.kind === 'image' ? selection.image.id : null
+  useEffect(() => {
+    if (selectedImageId === null) { setPuzzlesForSelectedImage([]); return }
+    let cancelled = false
+    api.puzzlesForImage(selectedImageId)
+      .then((list) => {
+        if (cancelled) return
+        setPuzzlesForSelectedImage([...list].sort((a, b) => a.columns * a.rows - b.columns * b.rows))
+      })
+      .catch(() => { if (!cancelled) setPuzzlesForSelectedImage([]) })
+    return () => { cancelled = true }
+  }, [selectedImageId, listVersion])   // 一覧を取り直したら、この画像のパズルも引き直す
   // 上のうちピース数の組（"列x行"）の集合。既存の組が選ばれているときは作成を止めるのに使う。
   const existingGridsForSelectedImage = useMemo(
     () => new Set(puzzlesForSelectedImage.map((p) => `${p.columns}x${p.rows}`)),
@@ -343,6 +351,18 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   )
   // 選択中のピース数のパズルがすでに存在するか。
   const pieceCountExists = existingGridsForSelectedImage.has(`${columns}x${rows}`)
+
+  // 選択中パズルの元画像。一覧の今のページに無いこともあるので id で引く
+  // （画像情報画面はログイン中だけなので、未ログインなら引かない）。
+  const selectedPuzzleImageId = selection?.kind === 'puzzle' && account ? selection.puzzle.image_id : null
+  useEffect(() => {
+    if (selectedPuzzleImageId === null) { setImageForSelectedPuzzle(null); return }
+    let cancelled = false
+    api.image(selectedPuzzleImageId)
+      .then((image) => { if (!cancelled) setImageForSelectedPuzzle(image) })
+      .catch(() => { if (!cancelled) setImageForSelectedPuzzle(null) })
+    return () => { cancelled = true }
+  }, [selectedPuzzleImageId])
 
   // 選択中パズルの途中経過と状態。
   const selectedProgress = selection?.kind === 'puzzle' ? progressByPuzzle.get(selection.puzzle.id) ?? null : null
@@ -467,13 +487,39 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           {selection.kind === 'image' && selection.mode === 'edit' && (
             <div className="selection-name">画像情報</div>
           )}
-          {/* パズル一覧から開いたパズル情報編集画面のとき。 */}
+          {/* パズル一覧から開いたパズル情報編集画面のとき。
+              左の「＜」で、そのパズルの元画像の画像情報画面へ戻れる。 */}
           {selection.kind === 'puzzle' && selection.mode === 'edit' && (
-            <div className="selection-name">パズル情報</div>
+            <div className="selection-name">
+              {imageForSelectedPuzzle && (
+                <button
+                  type="button"
+                  className="selection-back"
+                  onClick={() => selectImage(imageForSelectedPuzzle)}
+                  title="この画像の画像情報へ"
+                  aria-label="この画像の画像情報へ"
+                >
+                  ＜
+                </button>
+              )}
+              パズル情報
+            </div>
           )}
-          {/* 画像からピース数を決めるパズル作成画面のとき。 */}
+          {/* 画像からピース数を決めるパズル作成画面のとき。
+              左の「＜」で、その画像の画像情報画面へ戻れる。 */}
           {selection.kind === 'image' && selection.mode === 'create' && (
-            <div className="selection-name">パズル作成</div>
+            <div className="selection-name">
+              <button
+                type="button"
+                className="selection-back"
+                onClick={() => selectImage(selection.image)}
+                title="この画像の画像情報へ"
+                aria-label="この画像の画像情報へ"
+              >
+                ＜
+              </button>
+              パズル作成
+            </div>
           )}
           {/* プレイしたパズルから開いた進捗情報画面のとき。 */}
           {selection.kind === 'puzzle' && selection.mode === 'play' && (
@@ -619,8 +665,17 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                   {/* 末尾の「＋」でパズル作成画面へ進む。 */}
                   <div className="grid-chips">
                     {puzzlesForSelectedImage.length === 0 && <span className="muted">まだありません</span>}
+                    {/* 押すと、そのパズルの情報画面（パズル一覧から開いたのと同じ画面）へ移る。 */}
                     {puzzlesForSelectedImage.map((p) => (
-                      <span key={p.id} className="grid-chip">{p.columns} x {p.rows}</span>
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="grid-chip chip-link"
+                        onClick={() => selectPuzzleForEdit(p)}
+                        title={`${p.columns} x ${p.rows} のパズル情報へ`}
+                      >
+                        {p.columns} x {p.rows}
+                      </button>
                     ))}
                     <button
                       type="button"
@@ -915,13 +970,13 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       {account && (
         <Section
           title={filter === null ? '画像一覧' : `画像一覧（${filterLabel(filter)}）`}
-          empty={!loading && visibleImages.length === 0}
+          empty={!loading && images.length === 0}
           emptyText={filter === null
             ? 'まだ画像がありません。右のカードから画像をアップロードできます。'
             : 'この絞り込みに合う画像はありません。'}
         >
           <div className="card-grid">
-            {pagedImages.map((image) => (
+            {images.map((image) => (
               <button
                 key={image.id}
                 type="button"
@@ -939,7 +994,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           <Pager
             page={imagePage}
             pageCount={imagePageCount}
-            total={visibleImages.length}
+            total={imagesTotal}
             perPage={LIST_PER_PAGE}
             unit="枚"
             onChange={setImagePage}
@@ -950,12 +1005,12 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       {/* パズル一覧（常に表示） */}
       <Section
         title={filter === null ? 'パズル一覧' : `パズル一覧（${filterLabel(filter)}）`}
-        empty={!loading && visiblePuzzles.length === 0}
+        empty={!loading && puzzles.length === 0}
         emptyText={filter !== null
           ? 'この絞り込みに合うパズルはありません。'
           : account ? '「画像一覧」から画像を選び、ピース数を決めてパズルを作成できます。' : 'まだパズルがありません。'}>
         <div className="card-grid">
-          {pagedPuzzles.map((puzzle) => (
+          {puzzles.map((puzzle) => (
             <button
               key={puzzle.id}
               type="button"
@@ -973,7 +1028,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
         <Pager
           page={puzzlePage}
           pageCount={puzzlePageCount}
-          total={visiblePuzzles.length}
+          total={puzzlesTotal}
           perPage={LIST_PER_PAGE}
           unit="件"
           onChange={setPuzzlePage}

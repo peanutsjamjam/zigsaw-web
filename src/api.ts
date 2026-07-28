@@ -139,6 +139,23 @@ function messageFor(code: string, fields?: string[]): string {
   return MESSAGES[code] ?? code
 }
 
+// 一覧の絞り込み（タグ・自分の画像・ピース数の範囲）。サーバー側の SQL で効かせる。
+export type ListFilter = {
+  tag?: string
+  mine?: boolean
+  piecesMin?: number
+  piecesMax?: number
+}
+
+function listQuery(page: number, perPage: number, filter?: ListFilter): string {
+  const params = new URLSearchParams({ page: String(page), per_page: String(perPage) })
+  if (filter?.tag) params.set('tag', filter.tag)
+  if (filter?.mine) params.set('mine', '1')
+  if (filter?.piecesMin !== undefined) params.set('pieces_min', String(filter.piecesMin))
+  if (filter?.piecesMax !== undefined) params.set('pieces_max', String(filter.piecesMax))
+  return params.toString()
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     ...init,
@@ -182,7 +199,13 @@ export const api = {
     postJson<{ ok: true }>('?action=change_password', { current_password, new_password }),
   deleteAccount: () => request<{ ok: true }>('?action=account', { method: 'DELETE' }),
 
-  images: () => request<{ images: GalleryImage[] }>('?action=images').then((r) => r.images),
+  // 一覧はサーバー側でページングする。返り値の total は絞り込み後の総件数。
+  images: (page: number, perPage: number, filter?: ListFilter) =>
+    request<{ images: GalleryImage[]; total: number }>(`?action=images&${listQuery(page, perPage, filter)}`),
+  // 一覧に無い1件（パズル情報画面から元画像へ移るときなど）。
+  image: (id: number) => request<{ image: GalleryImage }>(`?action=image&id=${id}`).then((r) => r.image),
+  // 使われているタグ名の一覧（絞り込みのタグ一覧に使う）。
+  tags: () => request<{ tags: string[] }>('?action=tags').then((r) => r.tags),
   uploadImage: (payload: { display_name: string; original_name: string; ext: string; width: number; height: number; full: string; thumb: string }) =>
     postJson<{ image: GalleryImage }>('?action=image', payload).then((r) => r.image),
   // tags はタグ名の配列。サーバー側で正規化（trim・重複除去・上限）してから保存される。
@@ -190,7 +213,11 @@ export const api = {
     request<{ image: GalleryImage }>(`?action=image&id=${id}`, { method: 'PUT', body: JSON.stringify({ display_name, tags }) }).then((r) => r.image),
   deleteImage: (id: number) => request<{ ok: true }>(`?action=image&id=${id}`, { method: 'DELETE' }),
 
-  puzzles: () => request<{ puzzles: Puzzle[] }>('?action=puzzles').then((r) => r.puzzles),
+  puzzles: (page: number, perPage: number, filter?: ListFilter) =>
+    request<{ puzzles: Puzzle[]; total: number }>(`?action=puzzles&${listQuery(page, perPage, filter)}`),
+  // その画像で作成済みのパズル（ページングなしで全件）。
+  puzzlesForImage: (imageId: number) =>
+    request<{ puzzles: Puzzle[] }>(`?action=puzzles&image_id=${imageId}`).then((r) => r.puzzles),
   createPuzzle: (image_id: number, columns: number, rows: number) =>
     postJson<{ puzzle: Puzzle }>('?action=puzzle', { image_id, columns, rows }).then((r) => r.puzzle),
   deletePuzzle: (id: number) => request<{ ok: true }>(`?action=puzzle&id=${id}`, { method: 'DELETE' }),
