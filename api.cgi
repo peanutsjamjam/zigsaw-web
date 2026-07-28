@@ -1152,7 +1152,8 @@ eval {
         respond({ ok => JSON::PP::true });
     }
     elsif ($action eq 'puzzles' && $method eq 'GET') {
-        # 作成済みパズルの一覧（誰でも見られる）。新しい順。
+        # 作成済みパズルの一覧（誰でも見られる）。使っている画像の id 順、
+        # 同じ画像の中はピース数の少ない順（同数なら作成順）。
         # mine=作成者が自分か、play_count=そのパズルの進行状況（＝プレイ中/クリア済みの人）の数。
         # 画像一覧と同様、絞り込みとページングは SQL で行い total を返す。
         # ただし image_id 指定のとき（画像情報画面の「作成済みのパズル」）は、その画像ぶんを全件返す。
@@ -1179,7 +1180,7 @@ eval {
                JOIN images i ON i.id = p.image_id
                LEFT JOIN users cu ON cu.id = p.creator_id
               WHERE true $cond
-              ORDER BY p.created_at DESC, p.id DESC
+              ORDER BY p.image_id, p.columns * p.rows, p.id
               LIMIT ? OFFSET ?",
             { Slice => {} }, $uid, @$bind, $per_page, $offset
         );
