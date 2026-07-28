@@ -15,6 +15,11 @@ import { AccountMenu } from './AccountMenu'
 // 画像一覧・パズル一覧の1ページあたりの件数。これを超えるぶんはページを分けて出す。
 const LIST_PER_PAGE = 30
 
+// タグ名に使えない空白。JavaScript の \s は全角空白（U+3000）や改行・タブも含むが、
+// 意図をはっきりさせるため全角空白は明示しておく。タブは直接は打てない（Tab はフォーカス移動）
+// が、貼り付けでは入りうるので弾く対象に含める。
+const TAG_SPACE_RE = /[\s\u3000]/
+
 // タグの上限（api.cgi の $MAX_TAG_LENGTH / $MAX_TAGS_PER_IMAGE と揃える）。
 const MAX_TAG_LENGTH = 30
 const MAX_TAGS_PER_IMAGE = 20
@@ -122,6 +127,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [editTags, setEditTags] = useState('')
   // 入力欄は普段出さない。タグの並びの末尾の「＋」を押したときだけ出す。
   const [addingTag, setAddingTag] = useState(false)
+  // タグ入力欄の下に出す注意書き（空白が入っているときなど）。null なら何も出さない。
+  const [tagError, setTagError] = useState<string | null>(null)
   const [savingTags, setSavingTags] = useState(false)
   const [savingName, setSavingName] = useState(false)
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
@@ -320,8 +327,13 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   }
 
   // 入力欄の文字列を1つのタグとして追加する（Enter）。追加できたら入力欄は空に戻す。
+  // タグ名に空白は使えない（注意書きは入力した時点で出ている）。含まれていたら作らない。
   const addTag = async () => {
     if (selection?.kind !== 'image' || savingTags) return
+    if (TAG_SPACE_RE.test(editTags)) {
+      setTagError('空白文字は使用できません')
+      return
+    }
     const name = normalizeTagName(editTags)
     if (name === '') { setEditTags(''); return }
     const tags = selection.image.tags
@@ -634,7 +646,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                           <button
                             type="button"
                             className="grid-chip chip-add"
-                            onClick={() => { setEditTags(''); setAddingTag(true) }}
+                            onClick={() => { setEditTags(''); setTagError(null); setAddingTag(true) }}
                             title="タグを追加"
                             aria-label="タグを追加"
                           >
@@ -652,13 +664,18 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                           rows={2}
                           autoFocus
                           placeholder="タグ名を入力して Enter"
-                          onChange={(e) => setEditTags(e.target.value)}
-                          onBlur={() => { setAddingTag(false); setEditTags('') }}
+                          onChange={(e) => {
+                            // 空白は打った（貼った）時点で知らせる。Enter を待たない。
+                            setEditTags(e.target.value)
+                            setTagError(TAG_SPACE_RE.test(e.target.value) ? '空白文字は使用できません' : null)
+                          }}
+                          onBlur={() => { setAddingTag(false); setEditTags(''); setTagError(null) }}
                           onKeyDown={(e) => {
                             if (e.key === 'Escape') {
                               e.preventDefault()
                               setAddingTag(false)
                               setEditTags('')
+                              setTagError(null)
                               return
                             }
                             // 日本語入力の変換確定 Enter は拾わない。
@@ -668,6 +685,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                           }}
                         />
                       )}
+                      {addingTag && tagError && <div className="error tag-error">{tagError}</div>}
                     </>
                   ) : selection.image.tags.length > 0 ? (
                     <div className="grid-chips">

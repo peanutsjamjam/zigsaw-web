@@ -493,6 +493,8 @@
   cursor: pointer;
 }
 .tag-remove:hover:not(:disabled) { color: var(--danger); }
+/* タグ入力欄の下に出す注意書き。 */
+.tag-error { font-size: 12px; }
 /* 押すとその先の画面へ移るチップ（作成済みパズル → パズル情報画面）。 */
 .chip-link { font: inherit; font-size: 13px; line-height: 1.4; color: var(--text); cursor: pointer; }
 .chip-link:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); }
