@@ -1240,10 +1240,12 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       })()}
 
       {/* 画像アップロードの確認画面。ファイル名（変更不可＝original_name）を見せつつ、
-          「タイトル」（＝display_name）を編集して登録する。 */}
+          「タイトル」（＝display_name）を編集して登録する。
+          背景（暗い部分）を押しても閉じない。閉じるのは「キャンセル」だけ
+          ＝入力したタイトルを取り違えて捨ててしまわないように。 */}
       {pending && (
-        <div className="overlay dim" onClick={uploading ? undefined : cancelUpload}>
-          <div className="panel" onClick={(e) => e.stopPropagation()}>
+        <div className="overlay dim">
+          <div className="panel">
             <h2>この画像を登録しますか？</h2>
             <img className="upload-preview" src={pending.url} alt="" />
             <label className="field">ファイル名
