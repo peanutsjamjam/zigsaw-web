@@ -46,10 +46,12 @@ type Selection =
   | { kind: 'image'; image: GalleryImage; mode: 'edit' | 'create' }
   | { kind: 'puzzle'; puzzle: Puzzle; mode: 'edit' | 'play' }
 
-// 一覧の絞り込み。実際のタグのほかに、タグではない切り口（仮想タグ）でも絞り込める。
+// タグ一覧のチップ1つぶん。実際のタグのほかに、タグではない切り口（仮想タグ）もある。
 //   tag    … その名前のタグが付いた画像／パズル
 //   mine   … 自分がアップロードした画像／その画像から作られたパズル
 //   pieces … ピース数がその範囲のパズル／そのパズルを持つ画像
+// チップは押すたびに選択／非選択が入れ替わり、複数を同時に選べる。
+// タグと「自分の画像」は AND（全部に当てはまるもの）、ピース数どうしは OR（どれかに当てはまるもの）。
 type Filter =
   | { kind: 'tag'; name: string }
   | { kind: 'mine' }
@@ -73,6 +75,11 @@ function filterKey(filter: Filter): string {
 /** 見出しに出す絞り込みの名前。 */
 function filterLabel(filter: Filter): string {
   return filter.kind === 'tag' ? filter.name : filter.kind === 'mine' ? '自分の画像' : filter.label
+}
+
+/** 見出しに出す、選んでいる絞り込みの並び。 */
+function filtersLabel(filters: Filter[]): string {
+  return filters.map(filterLabel).join('・')
 }
 
 export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, onLoggedOut, busy }: Props) {
@@ -118,8 +125,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [savingTags, setSavingTags] = useState(false)
   const [savingName, setSavingName] = useState(false)
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
-  // 一覧の絞り込み。null なら絞り込まない（「すべて」）。
-  const [filter, setFilter] = useState<Filter | null>(null)
+  // 一覧の絞り込み。選んでいるチップの一覧（空なら絞り込まない＝「すべて」）。
+  const [filters, setFilters] = useState<Filter[]>([])
   // 画像一覧・パズル一覧のページ（1始まり）。
   const [imagePage, setImagePage] = useState(1)
   const [puzzlePage, setPuzzlePage] = useState(1)
@@ -132,12 +139,15 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [snapshotById, setSnapshotById] = useState<Record<number, string | null>>({})
 
   // 絞り込みを、サーバーに渡す形（クエリパラメータのもと）に直す。
+  // タグは複数並べると AND、ピース数の範囲は複数並べると OR になる（サーバー側の実装）。
   const listFilter = useMemo<ListFilter | undefined>(() => {
-    if (filter === null) return undefined
-    if (filter.kind === 'tag') return { tag: filter.name }
-    if (filter.kind === 'mine') return { mine: true }
-    return { piecesMin: filter.min, ...(filter.max === null ? {} : { piecesMax: filter.max }) }
-  }, [filter])
+    if (filters.length === 0) return undefined
+    return {
+      tags: filters.filter((f) => f.kind === 'tag').map((f) => f.name),
+      mine: filters.some((f) => f.kind === 'mine'),
+      pieces: filters.filter((f) => f.kind === 'pieces').map((f) => ({ min: f.min, max: f.max })),
+    }
+  }, [filters])
 
   // 一覧（画像・パズル）。ページと絞り込みが変わるたびに、そのページぶんだけ取り直す。
   const loadLists = useCallback(async () => {
@@ -194,6 +204,13 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     return map
   }, [progress])
 
+  // チップを押したとき: 選んでいなければ足し、選んでいれば外す。
+  const toggleFilter = useCallback((filter: Filter) => {
+    setFilters((cur) => cur.some((f) => filterKey(f) === filterKey(filter))
+      ? cur.filter((f) => filterKey(f) !== filterKey(filter))
+      : [...cur, filter])
+  }, [])
+
   // 仮想タグの並び。「自分の画像」はログイン中だけ出す。
   const virtualFilters = useMemo<Filter[]>(
     () => [
@@ -219,7 +236,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   // 件数が減ってページ数を超えたら最後のページに寄せる。
   const imagePageCount = Math.max(1, Math.ceil(imagesTotal / LIST_PER_PAGE))
   const puzzlePageCount = Math.max(1, Math.ceil(puzzlesTotal / LIST_PER_PAGE))
-  useEffect(() => { setImagePage(1); setPuzzlePage(1) }, [filter])
+  useEffect(() => { setImagePage(1); setPuzzlePage(1) }, [filters])
   useEffect(() => {
     setImagePage((cur) => Math.min(cur, imagePageCount))
   }, [imagePageCount])
@@ -949,19 +966,19 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
         <div className="tag-filters">
           <button
             type="button"
-            className={`tag-filter${filter === null ? ' selected' : ''}`}
-            onClick={() => setFilter(null)}
+            className={`tag-filter${filters.length === 0 ? ' selected' : ''}`}
+            onClick={() => setFilters([])}
           >
             すべて
           </button>
           {/* 仮想タグ（実際のタグではない切り口）。破線の枠で見分けられるようにする。 */}
           {virtualFilters.map((f) => (
-            <FilterChip key={filterKey(f)} filter={f} current={filter} onSelect={setFilter} virtual />
+            <FilterChip key={filterKey(f)} filter={f} current={filters} onToggle={toggleFilter} virtual />
           ))}
           {/* 仮想タグと実タグのあいだで行を分ける（flex の折り返しを強制する空要素）。 */}
           {allTags.length > 0 && <div className="tag-filters-break" />}
           {allTags.map((t) => (
-            <FilterChip key={`tag:${t}`} filter={{ kind: 'tag', name: t }} current={filter} onSelect={setFilter} />
+            <FilterChip key={`tag:${t}`} filter={{ kind: 'tag', name: t }} current={filters} onToggle={toggleFilter} />
           ))}
         </div>
       </Section>
@@ -969,9 +986,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       {/* 画像一覧（要ログイン） */}
       {account && (
         <Section
-          title={filter === null ? '画像一覧' : `画像一覧（${filterLabel(filter)}）`}
+          title={filters.length === 0 ? '画像一覧' : `画像一覧（${filtersLabel(filters)}）`}
           empty={!loading && images.length === 0}
-          emptyText={filter === null
+          emptyText={filters.length === 0
             ? 'まだ画像がありません。右のカードから画像をアップロードできます。'
             : 'この絞り込みに合う画像はありません。'}
         >
@@ -1004,9 +1021,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
 
       {/* パズル一覧（常に表示） */}
       <Section
-        title={filter === null ? 'パズル一覧' : `パズル一覧（${filterLabel(filter)}）`}
+        title={filters.length === 0 ? 'パズル一覧' : `パズル一覧（${filtersLabel(filters)}）`}
         empty={!loading && puzzles.length === 0}
-        emptyText={filter !== null
+        emptyText={filters.length > 0
           ? 'この絞り込みに合うパズルはありません。'
           : account ? '「画像一覧」から画像を選び、ピース数を決めてパズルを作成できます。' : 'まだパズルがありません。'}>
         <div className="card-grid">
@@ -1249,19 +1266,20 @@ function Pager({ page, pageCount, total, perPage, unit, onChange }: {
   )
 }
 
-/** タグ一覧の1つ。押すとその絞り込みにし、選択中のものをもう一度押すと解除する。 */
-function FilterChip({ filter, current, onSelect, virtual }: {
+/** タグ一覧の1つ。押すたびに選択／非選択が入れ替わる（複数を同時に選べる）。 */
+function FilterChip({ filter, current, onToggle, virtual }: {
   filter: Filter
-  current: Filter | null
-  onSelect: (next: Filter | null) => void
+  current: Filter[]
+  onToggle: (filter: Filter) => void
   virtual?: boolean
 }) {
-  const selected = current !== null && filterKey(current) === filterKey(filter)
+  const selected = current.some((f) => filterKey(f) === filterKey(filter))
   return (
     <button
       type="button"
       className={`tag-filter${virtual ? ' virtual' : ''}${selected ? ' selected' : ''}`}
-      onClick={() => onSelect(selected ? null : filter)}
+      aria-pressed={selected}
+      onClick={() => onToggle(filter)}
     >
       {filterLabel(filter)}
     </button>

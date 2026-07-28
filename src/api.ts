@@ -140,19 +140,20 @@ function messageFor(code: string, fields?: string[]): string {
 }
 
 // 一覧の絞り込み（タグ・自分の画像・ピース数の範囲）。サーバー側の SQL で効かせる。
+// tags は複数指定すると AND（全部付いているもの）、pieces は OR（どれかの範囲）。
 export type ListFilter = {
-  tag?: string
+  tags?: string[]
   mine?: boolean
-  piecesMin?: number
-  piecesMax?: number
+  pieces?: { min: number; max: number | null }[]
 }
 
 function listQuery(page: number, perPage: number, filter?: ListFilter): string {
   const params = new URLSearchParams({ page: String(page), per_page: String(perPage) })
-  if (filter?.tag) params.set('tag', filter.tag)
+  for (const tag of filter?.tags ?? []) params.append('tag', tag)
   if (filter?.mine) params.set('mine', '1')
-  if (filter?.piecesMin !== undefined) params.set('pieces_min', String(filter.piecesMin))
-  if (filter?.piecesMax !== undefined) params.set('pieces_max', String(filter.piecesMax))
+  if (filter?.pieces?.length) {
+    params.set('pieces', filter.pieces.map((r) => `${r.min}-${r.max ?? ''}`).join(','))
+  }
   return params.toString()
 }
 

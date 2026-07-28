@@ -43,10 +43,11 @@ use File::Basename qw(dirname);
 #   GET    ?action=dev_storage                      -> 画像ディレクトリの画像数/合計サイズ・FSの空き/総容量（開発環境のみ）
 #   GET    ?action=dev_users                        -> 全ユーザー一覧（開発環境のみ。本番は404。salt/iterations は返さない）
 #   GET    ?action=dev_user_detail&id=<uid>         -> 指定ユーザーの画像/パズル/保存ゲーム（開発環境のみ）
-#   GET    ?action=images[&page=&per_page=&tag=&mine=1&pieces_min=&pieces_max=]
+#   GET    ?action=images[&page=&per_page=&tag=&tag=&mine=1&pieces=2-50,401-]
 #                                                   -> アップロード画像一覧（未ログインでも可）。
 #                                                      {images,total,page,per_page}。絞り込み・
-#                                                      ページングはサーバー側で行う
+#                                                      ページングはサーバー側で行う（tag は複数=AND、
+#                                                      pieces のカンマ区切りは OR）
 #   GET    ?action=image&id=<id>                    -> 画像1件（一覧に無い1件を引く用）
 #   GET    ?action=tags                             -> 使われているタグ名の一覧（誰でも）
 #   POST   ?action=image  {display_name,original_name,width,height,ext,full,thumb}
@@ -55,7 +56,7 @@ use File::Basename qw(dirname);
 #   PUT    ?action=image&id=<id>  {display_name,tags?}  -> display_name/タグを変更（本人または管理者。
 #                                                      tags はタグ名の配列。キーが無ければタグは変えない）
 #   DELETE ?action=image&id=<id>                    -> 画像削除（本人または管理者。パズル/進行も CASCADE 削除）
-#   GET    ?action=puzzles[&page=&per_page=&tag=&mine=1&pieces_min=&pieces_max=]
+#   GET    ?action=puzzles[&page=&per_page=&tag=&tag=&mine=1&pieces=2-50,401-]
 #                                                   -> 作成済みパズル一覧（誰でも。画像情報+作成者名つき）。
 #                                                      {puzzles,total,page,per_page}
 #          ?action=puzzles&image_id=<id>            -> その画像のパズルを全件（ページングなし）
@@ -157,6 +158,23 @@ sub query_param {
         return $v;
     }
     return undef;
+}
+
+# 同じ名前のクエリパラメータを全部返す（tag=a&tag=b のような複数指定用）。
+sub query_params {
+    my ($name) = @_;
+    my $qs = $ENV{QUERY_STRING} || '';
+    my @out;
+    for my $pair (split /&/, $qs) {
+        my ($k, $v) = split /=/, $pair, 2;
+        next unless defined $k && $k eq $name;
+        $v = '' unless defined $v;
+        $v =~ tr/+/ /;
+        $v =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/ge;
+        utf8::decode($v);
+        push @out, $v;
+    }
+    return @out;
 }
 
 sub read_body_json {
@@ -552,16 +570,20 @@ sub purge_unused_tags {
 
 # ---- 一覧の絞り込みとページング --------------------------------------------
 # 一覧に効く絞り込みを、SQL の条件（WHERE に AND で足す）と束縛値にする。
-#   tag=<名前>           … そのタグが付いた画像／その画像から作られたパズル
-#   mine=1               … 自分がアップロードした画像／その画像から作られたパズル
-#   pieces_min/pieces_max… ピース数がその範囲のパズル／そのパズルを持つ 画像
+#   tag=<名前>（複数可）  … そのタグが付いた画像／その画像から作られたパズル。
+#                          複数指定は AND（全部のタグが付いているものだけ）。
+#   mine=1               … 自分がアップロードした画像／その画像から作られたパズル。
+#   pieces=2-50,401-     … ピース数の範囲。カンマ区切りで複数指定でき、そちらは OR
+#                          （どれかの範囲に当てはまればよい）。上限なしは "401-"。
 # $image_col は「その問い合わせで画像 id を指す式」（画像一覧なら i.id、パズル一覧なら p.image_id）。
+# $piece_expr を渡すと、ピース数はその式（＝パズル自身の列×行）で判定する。渡さなければ
+# 「その範囲のパズルを持っている画像か」を EXISTS で判定する。
 sub list_filters {
     my ($image_col, $uid, $piece_expr) = @_;
     my (@where, @bind);
 
-    my $tag = query_param('tag');
-    if (defined $tag && $tag ne '') {
+    for my $tag (query_params('tag')) {
+        next if $tag eq '';
         push @where, "EXISTS (SELECT 1 FROM image_tags it JOIN tags t ON t.id = it.tag_id
                                WHERE it.image_id = $image_col AND t.name = ?)";
         push @bind, $tag;
@@ -573,18 +595,27 @@ sub list_filters {
         push @bind, $uid;
     }
 
-    my $min = query_param('pieces_min');
-    my $max = query_param('pieces_max');
-    if (defined $min && $min ne '') {
-        # パズル一覧では、そのパズル自身のピース数（$piece_expr を渡す）で判定する。
-        # 画像一覧では「その範囲のパズルを持っている画像か」を EXISTS で判定する。
+    my $pieces = query_param('pieces');
+    if (defined $pieces && $pieces ne '') {
         my $expr = $piece_expr || 'pz.columns * pz.rows';
-        my $cond = "$expr >= ?";
-        my @b = (int($min));
-        if (defined $max && $max ne '') { $cond .= " AND $expr <= ?"; push @b, int($max); }
-        push @where, $piece_expr ? "($cond)"
-                   : "EXISTS (SELECT 1 FROM puzzles pz WHERE pz.image_id = $image_col AND $cond)";
-        push @bind, @b;
+        my (@ors, @pbind);
+        for my $range (split /,/, $pieces) {
+            my ($min, $max) = split /-/, $range, 2;
+            next unless defined $min && $min =~ /^[0-9]+$/;
+            if (defined $max && $max =~ /^[0-9]+$/) {
+                push @ors, "($expr >= ? AND $expr <= ?)";
+                push @pbind, int($min), int($max);
+            } else {
+                push @ors, "($expr >= ?)";
+                push @pbind, int($min);
+            }
+        }
+        if (@ors) {
+            my $cond = '(' . join(' OR ', @ors) . ')';
+            push @where, $piece_expr ? $cond
+                       : "EXISTS (SELECT 1 FROM puzzles pz WHERE pz.image_id = $image_col AND $cond)";
+            push @bind, @pbind;
+        }
     }
 
     my $sql = @where ? ' AND ' . join(' AND ', @where) : '';
