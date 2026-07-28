@@ -12,8 +12,8 @@ import { statusFromState, STATUS_TEXT, type PuzzleStatus } from '../lib/status'
 import { formatElapsed } from '../lib/format'
 import { AccountMenu } from './AccountMenu'
 
-// 画像一覧の1ページあたりの枚数。これを超えるぶんはページを分けて出す。
-const IMAGES_PER_PAGE = 30
+// 画像一覧・パズル一覧の1ページあたりの件数。これを超えるぶんはページを分けて出す。
+const LIST_PER_PAGE = 30
 
 // タグの上限（api.cgi の $MAX_TAG_LENGTH / $MAX_TAGS_PER_IMAGE と揃える）。
 const MAX_TAG_LENGTH = 30
@@ -114,8 +114,9 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [nameSavedNotice, setNameSavedNotice] = useState(false)
   // 一覧の絞り込み。null なら絞り込まない（「すべて」）。
   const [filter, setFilter] = useState<Filter | null>(null)
-  // 画像一覧のページ（1始まり）。
+  // 画像一覧・パズル一覧のページ（1始まり）。
   const [imagePage, setImagePage] = useState(1)
+  const [puzzlePage, setPuzzlePage] = useState(1)
   // 上段（タイトル下の詳細・プレビュー）を畳んでいるか。畳むと区切り線がタイトルのすぐ下に来る。
   const [headCollapsed, setHeadCollapsed] = useState(false)
   // プレイ中パズルの画像エリアのタブ（完成図 / 現在の様子）。既定は「現在の様子」。
@@ -196,16 +197,24 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     return puzzles.filter((p) => inPieceRange(p, filter))
   }, [puzzles, myImageIds, filter])
 
-  // 画像一覧のページ分け。絞り込みを変えたら1ページ目に戻し、
-  // 枚数が減ってページ数を超えたら最後のページに寄せる。
-  const imagePageCount = Math.max(1, Math.ceil(visibleImages.length / IMAGES_PER_PAGE))
-  useEffect(() => { setImagePage(1) }, [filter])
+  // 画像一覧・パズル一覧のページ分け。絞り込みを変えたら1ページ目に戻し、
+  // 件数が減ってページ数を超えたら最後のページに寄せる。
+  const imagePageCount = Math.max(1, Math.ceil(visibleImages.length / LIST_PER_PAGE))
+  const puzzlePageCount = Math.max(1, Math.ceil(visiblePuzzles.length / LIST_PER_PAGE))
+  useEffect(() => { setImagePage(1); setPuzzlePage(1) }, [filter])
   useEffect(() => {
     setImagePage((cur) => Math.min(cur, imagePageCount))
   }, [imagePageCount])
+  useEffect(() => {
+    setPuzzlePage((cur) => Math.min(cur, puzzlePageCount))
+  }, [puzzlePageCount])
   const pagedImages = useMemo(
-    () => visibleImages.slice((imagePage - 1) * IMAGES_PER_PAGE, imagePage * IMAGES_PER_PAGE),
+    () => visibleImages.slice((imagePage - 1) * LIST_PER_PAGE, imagePage * LIST_PER_PAGE),
     [visibleImages, imagePage],
+  )
+  const pagedPuzzles = useMemo(
+    () => visiblePuzzles.slice((puzzlePage - 1) * LIST_PER_PAGE, puzzlePage * LIST_PER_PAGE),
+    [visiblePuzzles, puzzlePage],
   )
 
   // 画像を選んだら、まず画像情報の修正画面（mode:'edit'）を出す。
@@ -919,7 +928,8 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             page={imagePage}
             pageCount={imagePageCount}
             total={visibleImages.length}
-            perPage={IMAGES_PER_PAGE}
+            perPage={LIST_PER_PAGE}
+            unit="枚"
             onChange={setImagePage}
           />
         </Section>
@@ -933,7 +943,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           ? 'この絞り込みに合うパズルはありません。'
           : account ? '「画像一覧」から画像を選び、ピース数を決めてパズルを作成できます。' : 'まだパズルがありません。'}>
         <div className="card-grid">
-          {visiblePuzzles.map((puzzle) => (
+          {pagedPuzzles.map((puzzle) => (
             <button
               key={puzzle.id}
               type="button"
@@ -947,6 +957,15 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
             </button>
           ))}
         </div>
+        {/* 一覧の下のページ送り。1ページ = LIST_PER_PAGE 件。 */}
+        <Pager
+          page={puzzlePage}
+          pageCount={puzzlePageCount}
+          total={visiblePuzzles.length}
+          perPage={LIST_PER_PAGE}
+          unit="件"
+          onChange={setPuzzlePage}
+        />
       </Section>
 
       {/* プレイしたパズル（要ログイン） */}
@@ -1118,11 +1137,13 @@ function Section({ title, empty, emptyText, children }: {
 }
 
 /** 一覧のページ送り。«（最初）‹（前）ページ番号 ›（次）»（最後）。1ページのときは出さない。 */
-function Pager({ page, pageCount, total, perPage, onChange }: {
+function Pager({ page, pageCount, total, perPage, unit, onChange }: {
   page: number
   pageCount: number
   total: number
   perPage: number
+  /** 件数の数え方（画像なら「枚」、パズルなら「件」）。 */
+  unit: string
   onChange: (next: number) => void
 }) {
   if (pageCount <= 1) return null
@@ -1156,7 +1177,7 @@ function Pager({ page, pageCount, total, perPage, onChange }: {
       <button type="button" className="pager-btn" disabled={page === pageCount}
         onClick={() => onChange(pageCount)} title="最後のページ" aria-label="最後のページ">»</button>
       </div>
-      <span className="muted pager-range">{total}枚中 {from}〜{to}枚</span>
+      <span className="muted pager-range">{total}{unit}中 {from}〜{to}{unit}</span>
     </div>
   )
 }
