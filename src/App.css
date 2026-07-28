@@ -81,7 +81,8 @@
 .setup-head.collapsed { padding-bottom: 8px; gap: 8px; }
 /* 上段を畳む／開くボタン（三角）。区切り線のすぐ上（畳んだときはすぐ下）の右端に、
    線に接するように置く（負のマージンで上段の下余白・下段の上余白を打ち消す）。 */
-.head-toggle {
+/* .icon-btn（後方で定義）に負けないよう、2クラスで詳細度を上げる。 */
+.icon-btn.head-toggle {
   align-self: flex-end;
   /* 下段は縦スクロールするフレックス列なので、指定しないと高さが潰される。 */
   flex: 0 0 auto;
@@ -89,16 +90,17 @@
   height: 22px;
   color: color-mix(in srgb, var(--muted) 55%, transparent);   /* 三角は薄め */
   margin-bottom: -16px;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
+  /* 線に接する下辺は角を丸めない。 */
+  border-radius: 8px 8px 0 0;
 }
 .head-toggle .flip { transform: rotate(180deg); }   /* 開くときは下向き三角 */
 /* 畳んでいるときのボタンは、一覧をスクロールしても区切り線のすぐ下に残す。 */
-.lists-toggle {
+.icon-btn.lists-toggle {
   position: sticky;
   top: 0;
   z-index: 2;
   margin-bottom: 0;
+  /* 線に接する上辺は角を丸めない。 */
   border-radius: 0 0 8px 8px;
 }
 
