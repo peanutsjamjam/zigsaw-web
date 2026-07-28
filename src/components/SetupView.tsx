@@ -851,7 +851,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       </div>
 
       {/* 下段: 各一覧。ここだけを縦スクロールさせ、上段の詳細が常に見えるようにする。 */}
-      <div className="setup-lists">
+      <div className={`setup-lists${headCollapsed ? ' collapsed' : ''}`}>
       {/* 畳んでいるときの戻すボタン。区切り線のすぐ下・右端に置く。 */}
       {headCollapsed && (
         <button

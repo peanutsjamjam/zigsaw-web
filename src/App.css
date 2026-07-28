@@ -79,11 +79,28 @@
 }
 /* 上段を畳んだときは、区切り線がタイトル行のすぐ下に来るよう余白を詰める。 */
 .setup-head.collapsed { padding-bottom: 8px; gap: 8px; }
-/* 上段を畳む／開くボタン（三角）。区切り線のすぐ上（畳んだときはすぐ下）の右端に置く。 */
-.head-toggle { align-self: flex-end; width: 28px; height: 22px; }
+/* 上段を畳む／開くボタン（三角）。区切り線のすぐ上（畳んだときはすぐ下）の右端に、
+   線に接するように置く（負のマージンで上段の下余白・下段の上余白を打ち消す）。 */
+.head-toggle {
+  align-self: flex-end;
+  /* 下段は縦スクロールするフレックス列なので、指定しないと高さが潰される。 */
+  flex: 0 0 auto;
+  width: 56px;
+  height: 22px;
+  color: color-mix(in srgb, var(--muted) 55%, transparent);   /* 三角は薄め */
+  margin-bottom: -16px;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
 .head-toggle .flip { transform: rotate(180deg); }   /* 開くときは下向き三角 */
 /* 畳んでいるときのボタンは、一覧をスクロールしても区切り線のすぐ下に残す。 */
-.lists-toggle { position: sticky; top: 0; z-index: 2; }
+.lists-toggle {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin-bottom: 0;
+  border-radius: 0 0 8px 8px;
+}
 
 /* 下段: 各一覧。区切り線を上に置き、この領域だけを縦スクロールさせる。 */
 .setup-lists {
@@ -96,6 +113,10 @@
   flex-direction: column;
   gap: 18px;
 }
+/* 畳んでいるときは先頭に「開く」ボタンが来る。上余白を無くして区切り線に接させる
+   （負のマージンだと sticky の基準がパディングを含むかどうかで見た目がずれるため、
+   パディング自体を消して合わせる）。 */
+.setup-lists.collapsed { padding-top: 0; }
 
 .setup-top {
   align-self: stretch;
