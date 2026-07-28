@@ -1231,17 +1231,23 @@ function pickRandom<T>(items: T[], n: number): T[] {
 const SLIDE_SECONDS = 7
 /** 歩くアニメーションが1周したあとに見せる枚数。 */
 const SLIDE_COUNT = 3
+/**
+ * 1枚ごとの動き方（App.css の同名クラス）。寄り／引きに左右・上下・斜めの
+ * 移動を組み合わせてある。1回のスライドショーでは重複しないように選ぶ。
+ */
+const SLIDE_MOTIONS = ['kb-in-right', 'kb-out-left', 'kb-in-down', 'kb-out-up', 'kb-in-diag', 'kb-out-diag']
 
 /**
  * プレビュー1枠。画像が無いときは破線の枠の中をピースが歩き（mac 版と同じ演出）、
  * ひと回りしたら登録画像から無作為に SLIDE_COUNT 枚を SLIDE_SECONDS 秒ずつ、
- * ゆっくり寄り／引きしながら映す。映し終えたらまた歩くところへ戻る。
+ * ゆっくり寄り／引き・上下左右に動かしながら映す。映し終えたらまた歩くところへ戻る。
+ * 枠の中をクリックすると、待たずに次の段階（歩き→1枚目、1枚目→2枚目…）へ進む。
  * 見せられる画像が無ければ、これまでどおり歩き続ける。
  */
 function PreviewBox({ url, photos }: { url: string | undefined; photos: string[] }) {
   const [tick, setTick] = useState(0)
-  // スライドショー中に映す画像。null なら「歩いている」状態。
-  const [slides, setSlides] = useState<string[] | null>(null)
+  // スライドショー中に映す画像と、その1枚ごとの動き方。null なら「歩いている」状態。
+  const [slides, setSlides] = useState<{ url: string; motion: string }[] | null>(null)
   const [slideIndex, setSlideIndex] = useState(0)
 
   // 歩くコマ送り（0.5 秒ごと）。
@@ -1251,39 +1257,68 @@ function PreviewBox({ url, photos }: { url: string | undefined; photos: string[]
     return () => window.clearInterval(timer)
   }, [url, slides])
 
-  // ひと回りしたら、無作為に選んだ画像のスライドショーへ移る。
+  // 無作為に選んだ画像でスライドショーを始める。
+  const startSlides = useCallback(() => {
+    const motions = pickRandom(SLIDE_MOTIONS, SLIDE_COUNT)
+    setSlides(pickRandom(photos, SLIDE_COUNT).map((photo, i) => ({ url: photo, motion: motions[i % motions.length] })))
+    setSlideIndex(0)
+  }, [photos])
+
+  // 次の段階へ。歩いている→1枚目、n枚目→n+1枚目、最後の1枚→また歩くところへ。
+  // 時間で進むときも、枠をクリックしたときも、ここを通る。
+  const advance = useCallback(() => {
+    if (url) return
+    if (!slides) {
+      if (photos.length > 0) startSlides()
+      else setTick(0)                       // 映せる画像が無ければ歩きをやり直す
+    } else if (slideIndex + 1 < slides.length) {
+      setSlideIndex((i) => i + 1)
+    } else {
+      setSlides(null)
+      setTick(0)
+    }
+  }, [url, slides, slideIndex, photos, startSlides])
+
+  // ひと回りしたら、スライドショーへ移る。
   useEffect(() => {
     if (url || slides || photos.length === 0) return
     if (tick < PLACEHOLDER_WALK_FRAMES.length) return
-    setSlides(pickRandom(photos, SLIDE_COUNT))
-    setSlideIndex(0)
-  }, [tick, url, slides, photos])
+    startSlides()
+  }, [tick, url, slides, photos, startSlides])
 
   // SLIDE_SECONDS 秒ごとに次の1枚へ。最後まで映したら歩くところへ戻る。
   useEffect(() => {
     if (url || !slides) return
-    const timer = window.setTimeout(() => {
-      if (slideIndex + 1 < slides.length) {
-        setSlideIndex((i) => i + 1)
-      } else {
-        setSlides(null)
-        setTick(0)
-      }
-    }, SLIDE_SECONDS * 1000)
+    const timer = window.setTimeout(advance, SLIDE_SECONDS * 1000)
     return () => window.clearTimeout(timer)
-  }, [url, slides, slideIndex])
+  }, [url, slides, advance])
 
   if (url) return <img className="preview-box" src={url} alt="" />
 
+  // 枠自体をクリック（またはキーボードの Enter/Space）で次の段階へ進める。
+  const boxProps = {
+    className: 'preview-box placeholder',
+    role: 'button',
+    tabIndex: 0,
+    title: '次へ',
+    'aria-label': '次の画像へ',
+    onClick: advance,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return
+      e.preventDefault()
+      advance()
+    },
+  }
+
   if (slides) {
     return (
-      <div className="preview-box placeholder">
-        {/* key を変えてアニメーションをやり直す。寄りと引きを1枚ごとに入れ替える。 */}
+      <div {...boxProps}>
+        {/* key を変えてアニメーションをやり直す。動き方は1枚ごとに変える。 */}
         <img
           key={slideIndex}
-          className={`preview-photo ${slideIndex % 2 === 0 ? 'zoom-in' : 'zoom-out'}`}
+          className={`preview-photo ${slides[slideIndex].motion}`}
           style={{ animationDuration: `${SLIDE_SECONDS}s` }}
-          src={slides[slideIndex]}
+          src={slides[slideIndex].url}
           alt=""
         />
       </div>
@@ -1292,7 +1327,7 @@ function PreviewBox({ url, photos }: { url: string | undefined; photos: string[]
 
   const frame = PLACEHOLDER_WALK_FRAMES[tick % PLACEHOLDER_WALK_FRAMES.length]
   return (
-    <div className="preview-box placeholder">
+    <div {...boxProps}>
       <img className="walker" src={SHAPE_IMAGES[frame.imageName]} alt="" style={{ transform: `translateX(${frame.offset}px)` }} />
     </div>
   )

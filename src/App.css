@@ -258,6 +258,7 @@
 .preview-box.placeholder {
   position: relative;
   overflow: hidden;
+  cursor: pointer;   /* クリックで次の段階（歩き→1枚目→2枚目…）へ進む */
   border: 1.5px dashed color-mix(in srgb, var(--muted) 60%, transparent);
 }
 /* 歩くアニメーションのあとに映すスライドショー。枠の大きさは変えず、
@@ -270,13 +271,33 @@
   object-fit: cover;
   will-change: transform, opacity;
 }
-@keyframes preview-zoom-in {
-  from { transform: scale(1); }
-  to   { transform: scale(1.16); }
+/* 寄り／引きに左右・上下・斜めの移動を混ぜた6通り。中心を保ったままの拡大縮小だと
+   単調なので、1枚ごとに違う動きを割り当てる。
+   ずらしても余白が出ないよう、拡大率は常に 1.10 以上（＝上下左右に5%ずつの余り）に対して
+   移動は最大3%（実効 1.1×3%=3.3%）に抑えてある。 */
+@keyframes kb-in-right {
+  from { transform: scale(1.10) translate(-3%, 0); }
+  to   { transform: scale(1.24) translate(3%, 0); }
 }
-@keyframes preview-zoom-out {
-  from { transform: scale(1.16); }
-  to   { transform: scale(1); }
+@keyframes kb-out-left {
+  from { transform: scale(1.24) translate(3%, 0); }
+  to   { transform: scale(1.10) translate(-3%, 0); }
+}
+@keyframes kb-in-down {
+  from { transform: scale(1.10) translate(0, -3%); }
+  to   { transform: scale(1.24) translate(0, 3%); }
+}
+@keyframes kb-out-up {
+  from { transform: scale(1.24) translate(0, 3%); }
+  to   { transform: scale(1.10) translate(0, -3%); }
+}
+@keyframes kb-in-diag {
+  from { transform: scale(1.10) translate(-2.5%, -2.5%); }
+  to   { transform: scale(1.24) translate(2.5%, 2.5%); }
+}
+@keyframes kb-out-diag {
+  from { transform: scale(1.24) translate(2.5%, -2.5%); }
+  to   { transform: scale(1.10) translate(-2.5%, 2.5%); }
 }
 @keyframes preview-fade {
   from { opacity: 0; }
@@ -284,11 +305,15 @@
   92%  { opacity: 1; }
   to   { opacity: 0; }
 }
-.preview-photo.zoom-in  { animation: preview-zoom-in 7s linear both, preview-fade 7s linear both; }
-.preview-photo.zoom-out { animation: preview-zoom-out 7s linear both, preview-fade 7s linear both; }
-/* 動きを減らす設定のときは、寄り／引きをやめて静止画として映す。 */
+.preview-photo.kb-in-right { animation: kb-in-right 7s linear both, preview-fade 7s linear both; }
+.preview-photo.kb-out-left { animation: kb-out-left 7s linear both, preview-fade 7s linear both; }
+.preview-photo.kb-in-down  { animation: kb-in-down 7s linear both, preview-fade 7s linear both; }
+.preview-photo.kb-out-up   { animation: kb-out-up 7s linear both, preview-fade 7s linear both; }
+.preview-photo.kb-in-diag  { animation: kb-in-diag 7s linear both, preview-fade 7s linear both; }
+.preview-photo.kb-out-diag { animation: kb-out-diag 7s linear both, preview-fade 7s linear both; }
+/* 動きを減らす設定のときは、寄り／引き・移動をやめて静止画として映す。 */
 @media (prefers-reduced-motion: reduce) {
-  .preview-photo.zoom-in, .preview-photo.zoom-out { animation: preview-fade 7s linear both; }
+  .preview-photo { animation: preview-fade 7s linear both !important; }
 }
 
 .walker {
