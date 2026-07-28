@@ -570,7 +570,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                         {!addingTag && (
                           <button
                             type="button"
-                            className="grid-chip tag-add"
+                            className="grid-chip chip-add"
                             onClick={() => { setEditTags(''); setAddingTag(true) }}
                             title="タグを追加"
                             aria-label="タグを追加"
@@ -616,20 +616,23 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 {error && <div className="error">{error}</div>}
                 <div className="edit-item">
                   <span className="edit-label">この画像で作成済みのパズル</span>
-                  {puzzlesForSelectedImage.length === 0 ? (
-                    <span className="muted">まだありません</span>
-                  ) : (
-                    <div className="grid-chips">
-                      {puzzlesForSelectedImage.map((p) => (
-                        <span key={p.id} className="grid-chip">{p.columns} x {p.rows}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="row edit-buttons">
-                  <button type="button" className="btn primary large" onClick={goToCreate} disabled={savingName}>
-                    パズル作成画面へ
-                  </button>
+                  {/* 末尾の「＋」でパズル作成画面へ進む。 */}
+                  <div className="grid-chips">
+                    {puzzlesForSelectedImage.length === 0 && <span className="muted">まだありません</span>}
+                    {puzzlesForSelectedImage.map((p) => (
+                      <span key={p.id} className="grid-chip">{p.columns} x {p.rows}</span>
+                    ))}
+                    <button
+                      type="button"
+                      className="grid-chip chip-add"
+                      onClick={goToCreate}
+                      disabled={savingName}
+                      title="この画像でパズルを作成する"
+                      aria-label="この画像でパズルを作成する"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
                 {/* 作成済みパズルが無く、自分がアップロードした画像のときだけ削除できる
                     （パズルがあると連鎖削除になるため、0個のときに限る）。 */}
