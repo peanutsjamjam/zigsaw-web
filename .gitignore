@@ -30,3 +30,4 @@ images/incoming/
 # 作業指示メモ（リポジトリには含めない）
 order.txt
 memo.txt
+others/*
