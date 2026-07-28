@@ -1135,6 +1135,7 @@ function Pager({ page, pageCount, total, perPage, onChange }: {
   const to = Math.min(total, page * perPage)
   return (
     <div className="pager">
+      <div className="pager-buttons">
       <button type="button" className="pager-btn" disabled={page === 1}
         onClick={() => onChange(1)} title="最初のページ" aria-label="最初のページ">«</button>
       <button type="button" className="pager-btn" disabled={page === 1}
@@ -1154,6 +1155,7 @@ function Pager({ page, pageCount, total, perPage, onChange }: {
         onClick={() => onChange(page + 1)} title="次のページ" aria-label="次のページ">›</button>
       <button type="button" className="pager-btn" disabled={page === pageCount}
         onClick={() => onChange(pageCount)} title="最後のページ" aria-label="最後のページ">»</button>
+      </div>
       <span className="muted pager-range">{total}枚中 {from}〜{to}枚</span>
     </div>
   )

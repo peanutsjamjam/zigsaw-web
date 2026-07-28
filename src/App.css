@@ -369,8 +369,9 @@
   border-radius: 999px;
   background: var(--panel-2);
 }
-/* 一覧の下のページ送り。 */
-.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 10px; }
+/* 一覧の下のページ送り。ボタンの行と枚数の行に分け、どちらも中央に置く。 */
+.pager { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 10px; }
+.pager-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
 .pager-btn {
   font: inherit;
   font-size: 13px;
@@ -385,7 +386,7 @@
 .pager-btn:hover:not(:disabled) { border-color: var(--accent); }
 .pager-btn:disabled { opacity: 0.4; cursor: default; }
 .pager-btn.current { background: var(--accent); border-color: transparent; color: #fff; }
-.pager-range { margin-left: 8px; font-size: 12px; }
+.pager-range { font-size: 12px; }
 
 /* タグ一覧（絞り込み）。押したタグの画像・パズルだけを一覧に出す。 */
 .tag-filters { display: flex; flex-wrap: wrap; gap: 6px; }
