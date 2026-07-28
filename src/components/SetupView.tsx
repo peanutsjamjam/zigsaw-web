@@ -197,6 +197,15 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     return puzzles.filter((p) => inPieceRange(p, filter))
   }, [puzzles, myImageIds, filter])
 
+  // プレースホルダーのスライドショーに映せる画像（サムネ）。未ログインだと画像一覧は
+  // 取れないので、パズル側の画像も合わせて拾う（同じ画像は1つにまとめる）。
+  const previewPhotos = useMemo(() => {
+    const byImage = new Map<number, string>()
+    for (const image of images) byImage.set(image.id, image.thumb_url)
+    for (const puzzle of puzzles) if (!byImage.has(puzzle.image_id)) byImage.set(puzzle.image_id, puzzle.thumb_url)
+    return [...byImage.values()]
+  }, [images, puzzles])
+
   // 画像一覧・パズル一覧のページ分け。絞り込みを変えたら1ページ目に戻し、
   // 件数が減ってページ数を超えたら最後のページに寄せる。
   const imagePageCount = Math.max(1, Math.ceil(visibleImages.length / LIST_PER_PAGE))
@@ -840,7 +849,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
         </div>
       ) : (
         <div className="preview-row">
-          <PreviewBox url={undefined} />
+          <PreviewBox url={undefined} photos={previewPhotos} />
         </div>
       ))}
 
@@ -1208,16 +1217,78 @@ function badgeFor(item: ProgressItem | undefined, puzzle: Puzzle) {
   return <div className={`status ${status}`}>{STATUS_TEXT[status]}</div>
 }
 
-/** プレビュー1枠。画像が無いときは破線の枠の中をピースが歩く（mac 版と同じ演出）。 */
-function PreviewBox({ url }: { url: string | undefined }) {
+/** 配列から重複なく最大 n 個を無作為に選ぶ。 */
+function pickRandom<T>(items: T[], n: number): T[] {
+  const rest = [...items]
+  const picked: T[] = []
+  while (picked.length < n && rest.length > 0) {
+    picked.push(...rest.splice(Math.floor(Math.random() * rest.length), 1))
+  }
+  return picked
+}
+
+/** スライドショーで1枚を映す秒数。 */
+const SLIDE_SECONDS = 7
+/** 歩くアニメーションが1周したあとに見せる枚数。 */
+const SLIDE_COUNT = 3
+
+/**
+ * プレビュー1枠。画像が無いときは破線の枠の中をピースが歩き（mac 版と同じ演出）、
+ * ひと回りしたら登録画像から無作為に SLIDE_COUNT 枚を SLIDE_SECONDS 秒ずつ、
+ * ゆっくり寄り／引きしながら映す。映し終えたらまた歩くところへ戻る。
+ * 見せられる画像が無ければ、これまでどおり歩き続ける。
+ */
+function PreviewBox({ url, photos }: { url: string | undefined; photos: string[] }) {
   const [tick, setTick] = useState(0)
+  // スライドショー中に映す画像。null なら「歩いている」状態。
+  const [slides, setSlides] = useState<string[] | null>(null)
+  const [slideIndex, setSlideIndex] = useState(0)
+
+  // 歩くコマ送り（0.5 秒ごと）。
   useEffect(() => {
-    if (url) return
+    if (url || slides) return
     const timer = window.setInterval(() => setTick((t) => t + 1), 500)
     return () => window.clearInterval(timer)
-  }, [url])
+  }, [url, slides])
+
+  // ひと回りしたら、無作為に選んだ画像のスライドショーへ移る。
+  useEffect(() => {
+    if (url || slides || photos.length === 0) return
+    if (tick < PLACEHOLDER_WALK_FRAMES.length) return
+    setSlides(pickRandom(photos, SLIDE_COUNT))
+    setSlideIndex(0)
+  }, [tick, url, slides, photos])
+
+  // SLIDE_SECONDS 秒ごとに次の1枚へ。最後まで映したら歩くところへ戻る。
+  useEffect(() => {
+    if (url || !slides) return
+    const timer = window.setTimeout(() => {
+      if (slideIndex + 1 < slides.length) {
+        setSlideIndex((i) => i + 1)
+      } else {
+        setSlides(null)
+        setTick(0)
+      }
+    }, SLIDE_SECONDS * 1000)
+    return () => window.clearTimeout(timer)
+  }, [url, slides, slideIndex])
 
   if (url) return <img className="preview-box" src={url} alt="" />
+
+  if (slides) {
+    return (
+      <div className="preview-box placeholder">
+        {/* key を変えてアニメーションをやり直す。寄りと引きを1枚ごとに入れ替える。 */}
+        <img
+          key={slideIndex}
+          className={`preview-photo ${slideIndex % 2 === 0 ? 'zoom-in' : 'zoom-out'}`}
+          style={{ animationDuration: `${SLIDE_SECONDS}s` }}
+          src={slides[slideIndex]}
+          alt=""
+        />
+      </div>
+    )
+  }
 
   const frame = PLACEHOLDER_WALK_FRAMES[tick % PLACEHOLDER_WALK_FRAMES.length]
   return (
