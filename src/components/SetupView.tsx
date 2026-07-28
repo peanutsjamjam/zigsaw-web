@@ -20,6 +20,9 @@ const LIST_PER_PAGE = 30
 // が、貼り付けでは入りうるので弾く対象に含める。
 const TAG_SPACE_RE = /[\s\u3000]/
 
+// 入力欄の下に出す、既存タグの候補の最大数。
+const MAX_TAG_SUGGESTIONS = 8
+
 // タグの上限（api.cgi の $MAX_TAG_LENGTH / $MAX_TAGS_PER_IMAGE と揃える）。
 const MAX_TAG_LENGTH = 30
 const MAX_TAGS_PER_IMAGE = 20
@@ -343,6 +346,32 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
       return
     }
     setEditTags('')
+    await saveTags(selection.image, [...tags, name])
+  }
+
+  // 入力中の文字列で始まる既存のタグ（この画像にまだ付いていないもの）。入力欄の下に出す。
+  const tagSuggestions = useMemo(() => {
+    if (!addingTag || selection?.kind !== 'image') return []
+    const head = editTags.trim().toLowerCase()
+    if (head === '') return []
+    const current = selection.image.tags
+    return allTags
+      .filter((t) => !current.includes(t) && t.toLowerCase().startsWith(head))
+      .slice(0, MAX_TAG_SUGGESTIONS)
+  }, [addingTag, editTags, allTags, selection])
+
+  // 候補を押したとき: そのタグをこの画像に付けて、入力欄は閉じる。
+  const pickSuggestedTag = async (name: string) => {
+    if (selection?.kind !== 'image' || savingTags) return
+    const tags = selection.image.tags
+    setAddingTag(false)
+    setEditTags('')
+    setTagError(null)
+    if (tags.includes(name)) return
+    if (tags.length >= MAX_TAGS_PER_IMAGE) {
+      setError(`タグは1枚につき${MAX_TAGS_PER_IMAGE}個までです。`)
+      return
+    }
     await saveTags(selection.image, [...tags, name])
   }
 
@@ -686,6 +715,25 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                         />
                       )}
                       {addingTag && tagError && <div className="error tag-error">{tagError}</div>}
+                      {/* 入力の続きになる既存タグ。押すとその場で付けて入力欄を閉じる。
+                          onMouseDown で既定動作を止めるのは、入力欄が blur で閉じて
+                          クリックが届かなくなるのを防ぐため。 */}
+                      {tagSuggestions.length > 0 && (
+                        <div className="grid-chips tag-suggests">
+                          {tagSuggestions.map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              className="grid-chip chip-link"
+                              title={`タグ「${t}」を付ける`}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => void pickSuggestedTag(t)}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </>
                   ) : selection.image.tags.length > 0 ? (
                     <div className="grid-chips">
