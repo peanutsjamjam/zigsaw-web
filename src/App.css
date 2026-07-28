@@ -67,6 +67,9 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* 画像情報・パズル情報・進捗情報の各カードで、画像に使える高さの上限。
+     縦長の画像でもカードが伸びないよう、幅ではなく高さを基準にして拡大縮小する。 */
+  --card-image-h: min(360px, 42vh);
 }
 /* 上段: タイトル＋選択中の詳細。スクロールしない。 */
 .setup-head {
@@ -87,8 +90,10 @@
   /* 下段は縦スクロールするフレックス列なので、指定しないと高さが潰される。 */
   flex: 0 0 auto;
   width: 56px;
-  height: 22px;
+  height: 18px;
   color: color-mix(in srgb, var(--muted) 55%, transparent);   /* 三角は薄め */
+  /* 上のカードとの間隔を詰める（上段の gap 16px を打ち消してぶんだけ寄せる）。 */
+  margin-top: -10px;
   margin-bottom: -16px;
   /* 線に接する下辺は角を丸めない。 */
   border-radius: 8px 8px 0 0;
@@ -346,8 +351,11 @@
 /* 画像情報修正画面: 左に画像、右に情報 */
 .edit-layout { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
 .edit-image img {
-  width: 640px;
-  max-height: 46vh;
+  /* 高さを基準に、縦横比を保ったまま収める（横長は幅、縦長は高さで頭打ちになる）。 */
+  width: auto;
+  height: auto;
+  max-width: min(640px, 100%);
+  max-height: var(--card-image-h);
   object-fit: contain;
   border-radius: 10px;
   border: 1px solid var(--border);
@@ -356,12 +364,17 @@
 .edit-fields {
   display: flex;
   flex-direction: column;
+  /* 画像と同じ高さで頭打ちにし、入りきらなければスクロールさせるのではなく
+     右へ列を足す（＝カードが横に広がる）。 */
+  flex-wrap: wrap;
+  align-content: flex-start;
+  max-height: var(--card-image-h);
   gap: 12px;
-  align-items: stretch;
+  column-gap: 24px;
   text-align: left;
-  min-width: min(320px, 80vw);
-  max-width: 360px;
 }
+/* 列の幅。項目・通知・ボタン列とも同じ幅で揃える。 */
+.edit-fields > * { width: min(320px, 80vw); }
 /* 作成画面: 画像の上にピース分割線を重ねる */
 .piece-grid { position: relative; max-width: 100%; align-self: flex-start; }
 .piece-grid img {

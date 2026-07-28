@@ -792,7 +792,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
               <div
                 className="piece-grid"
                 style={{
-                  width: `min(640px, calc(60vh * ${selection.image.width} / ${selection.image.height}))`,
+                  width: `min(640px, calc(var(--card-image-h) * ${selection.image.width} / ${selection.image.height}))`,
                   aspectRatio: `${selection.image.width} / ${selection.image.height}`,
                 }}
               >
@@ -939,7 +939,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 <div
                   className="piece-grid"
                   style={{
-                    width: `min(640px, calc(60vh * ${p.width} / ${p.height}))`,
+                    width: `min(640px, calc(var(--card-image-h) * ${p.width} / ${p.height}))`,
                     aspectRatio: `${p.width} / ${p.height}`,
                   }}
                 >
