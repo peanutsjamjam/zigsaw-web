@@ -241,15 +241,18 @@
 }
 .selection-close:hover { background: var(--panel); color: var(--text); }
 /* カード左上の画面名（小さめ・控えめ）。 */
+/* カードの左外側・上端に置く（高さはカード内に置いていたときと同じ）。
+   幅が足りない画面では、はみ出さないようカード内に戻す（下の @media 参照）。 */
 .selection-name {
   position: absolute;
   top: 6px;
-  left: 8px;
+  right: calc(100% + 10px);
   font-size: 12px;
   color: var(--muted);
   display: flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
 }
 /* 画面名の左の「＜」。押すと元画像の画像情報画面へ移る。 */
 .selection-back {
@@ -829,6 +832,11 @@ input.mismatch { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger
   padding: 6px 16px;
   z-index: 15;
   pointer-events: none;
+}
+
+@media (max-width: 1100px) {
+  /* カードの外に置くと画面からはみ出すので、従来どおりカードの左上に戻す。 */
+  .selection-name { right: auto; left: 8px; }
 }
 
 @media (max-width: 700px) {
