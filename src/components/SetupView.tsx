@@ -57,12 +57,12 @@ type Filter =
 
 // ピース数の仮想タグ（列×行の合計で分ける）。
 const PIECE_RANGES: { label: string; min: number; max: number | null }[] = [
-  { label: '〜50ピース',  min: 0,   max: 50 },
-  { label: '〜100ピース', min: 51,  max: 100 },
-  { label: '〜200ピース', min: 101, max: 200 },
-  { label: '〜300ピース', min: 201, max: 300 },
-  { label: '〜400ピース', min: 301, max: 400 },
-  { label: '401〜ピース', min: 401, max: null },
+  { label: '2-50ピース',    min: 2,   max: 50 },
+  { label: '51-100ピース',  min: 51,  max: 100 },
+  { label: '101-200ピース', min: 101, max: 200 },
+  { label: '201-300ピース', min: 201, max: 300 },
+  { label: '301-400ピース', min: 301, max: 400 },
+  { label: '401-ピース',    min: 401, max: null },
 ]
 
 /** 絞り込みを見分けるための文字列（チップの選択状態の比較に使う）。 */
