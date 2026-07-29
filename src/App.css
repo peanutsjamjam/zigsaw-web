@@ -240,6 +240,9 @@
   color: var(--muted);
 }
 .selection-close:hover { background: var(--panel); color: var(--text); }
+/* 緊急退避（管理者のみ）。× の左に並べ、それと分かるよう赤系にする。 */
+.selection-quarantine { right: 46px; color: var(--danger); }
+.selection-quarantine:hover { color: var(--danger); border-color: var(--danger); }
 /* カード左上の画面名（小さめ・控えめ）。 */
 /* カードの左外側・上端に置く（高さはカード内に置いていたときと同じ）。
    幅が足りない画面では、はみ出さないようカード内に戻す（下の @media 参照）。 */

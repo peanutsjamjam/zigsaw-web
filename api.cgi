@@ -56,6 +56,9 @@ use File::Basename qw(dirname);
 #   PUT    ?action=image&id=<id>  {display_name,tags?}  -> display_name/タグを変更（本人または管理者。
 #                                                      tags はタグ名の配列。キーが無ければタグは変えない）
 #   DELETE ?action=image&id=<id>                    -> 画像削除（本人または管理者。パズル/進行も CASCADE 削除）
+#   POST   ?action=image_quarantine&id=<id>         -> 緊急退避（管理者のみ）。画像・パズル・進捗を
+#                                                      アプリから消し、実ファイルと消す前の内容を
+#                                                      /home/zigsaw/quarantine へ移す
 #   GET    ?action=puzzles[&page=&per_page=&tag=&tag=&mine=1&pieces=2-50,401-]
 #                                                   -> 作成済みパズル一覧（誰でも。画像情報+作成者名つき）。
 #                                                      {puzzles,total,page,per_page}
@@ -112,6 +115,11 @@ our $ZIGSAW_BASE_URL = '';
 
 # 画像の実ファイルを置くディレクトリ（api.cgi と同じ場所を基準にする）。
 my $IMAGE_DIR = dirname(__FILE__) . '/images';
+
+# 緊急退避（公序良俗に反する投稿などを、管理者がアプリから消して隔離する）先。
+# 実ファイルと、消す前の DB の行（画像・パズル・進捗・タグ）をここに書き出す。
+# dev / 本番で同じ場所を使う。書き込めるよう ACL で apache と sugawara に rwx を与えてある。
+my $QUARANTINE_DIR = '/home/zigsaw/quarantine';
 
 my $JSON = JSON::PP->new->utf8->canonical;
 
@@ -483,6 +491,20 @@ sub decode_upload {
     fail('image_missing', '400 Bad Request', { field => $what }) if !defined $bytes || $bytes eq '';
     fail('image_too_large', '413 Payload Too Large', { field => $what }) if length($bytes) > $MAX_IMAGE_BYTES;
     return $bytes;
+}
+
+# ファイルを移す。まず rename、ダメなら（別ファイルシステム等）読み書きして元を消す。
+sub move_file {
+    my ($src, $dst) = @_;
+    return 1 if rename($src, $dst);
+    open my $in,  '<:raw', $src or die "open $src: $!";
+    open my $out, '>:raw', $dst or die "open $dst: $!";
+    my $buf;
+    while (my $n = read($in, $buf, 1 << 20)) { print $out $buf }
+    close $in;
+    close $out or die "close $dst: $!";
+    unlink $src;
+    return 1;
 }
 
 sub write_file {
@@ -1182,6 +1204,63 @@ eval {
         unlink "$IMAGE_DIR/full/$row->{basename}.$row->{ext}", "$IMAGE_DIR/thumb/$row->{basename}.jpg";
         respond({ ok => JSON::PP::true });
     }
+    elsif ($action eq 'image_quarantine' && $method eq 'POST') {
+        # 緊急退避（管理者のみ）。その画像・それを使ったパズル・進捗をアプリから消し、
+        # 実ファイルと消す前の内容を $QUARANTINE_DIR へ移す。＝無かった状態に戻す。
+        my $u = require_user($dbh);
+        fail('forbidden', '403 Forbidden') unless pgbool($u->{is_admin}) == JSON::PP::true;
+        my $id = int(query_param('id') || 0);
+        my $image = $dbh->selectrow_hashref('SELECT * FROM images WHERE id = ?', undef, $id);
+        fail('not_found', '404 Not Found') unless $image;
+
+        # 消す前に、ぶら下がっているものを控えておく。
+        my $puzzles = $dbh->selectall_arrayref(
+            'SELECT * FROM puzzles WHERE image_id = ?', { Slice => {} }, $id);
+        my $progress = $dbh->selectall_arrayref(
+            'SELECT pr.*, u.username AS player
+               FROM progress pr JOIN puzzles p ON p.id = pr.puzzle_id
+               LEFT JOIN users u ON u.id = pr.user_id
+              WHERE p.image_id = ?', { Slice => {} }, $id);
+        my $tags = $dbh->selectcol_arrayref(
+            'SELECT t.name FROM image_tags it JOIN tags t ON t.id = it.tag_id WHERE it.image_id = ?',
+            undef, $id);
+
+        # 退避先は「日時-image<id>」の1件1ディレクトリ。
+        my @now = localtime;
+        my $stamp = sprintf('%04d%02d%02d-%02d%02d%02d',
+                            $now[5] + 1900, $now[4] + 1, $now[3], $now[2], $now[1], $now[0]);
+        my $dir = "$QUARANTINE_DIR/$stamp-image$id";
+        my $full  = "$IMAGE_DIR/full/$image->{basename}.$image->{ext}";
+        my $thumb = "$IMAGE_DIR/thumb/$image->{basename}.jpg";
+        my $moved = eval {
+            mkdir $QUARANTINE_DIR unless -d $QUARANTINE_DIR;
+            mkdir $dir or die "mkdir $dir: $!";
+            my $meta = {
+                removed_at => $stamp,
+                removed_by => $u->{username},
+                image      => $image,
+                puzzles    => $puzzles,
+                progress   => $progress,
+                tags       => $tags,
+            };
+            write_file("$dir/meta.json", $JSON->encode($meta));
+            # 実ファイルは移動（別ファイルシステムなら move_file が copy+unlink する）。
+            move_file($full,  "$dir/full-$image->{basename}.$image->{ext}") if -f $full;
+            move_file($thumb, "$dir/thumb-$image->{basename}.jpg")          if -f $thumb;
+            1;
+        };
+        fail('quarantine_failed', '500 Internal Server Error') unless $moved;
+
+        # DB から消す。puzzles / progress / image_tags は CASCADE で一緒に消える。
+        $dbh->do('DELETE FROM images WHERE id = ?', undef, $id);
+        purge_unused_tags($dbh);
+        respond({
+            ok       => JSON::PP::true,
+            dir      => $dir,
+            puzzles  => 0 + scalar(@$puzzles),
+            progress => 0 + scalar(@$progress),
+        });
+    }
     elsif ($action eq 'puzzles' && $method eq 'GET') {
         # 作成済みパズルの一覧（誰でも見られる）。使っている画像の id 順、
         # 同じ画像の中はピース数の少ない順（同数なら作成順）。
@@ -1321,7 +1400,9 @@ eval {
         my $puzzle_id = int($body->{puzzle_id} || 0);
         my $state     = $body->{state};
         fail('bad_request') if $puzzle_id < 1 || ref($state) ne 'HASH';
-        fail('not_found', '404 Not Found')
+        # プレイ中に管理者がその画像を退避（緊急削除）するとパズルごと消える。
+        # 遊んでいる人に伝わるよう、専用のコードを返す（フロントはゲームを終了させる）。
+        fail('puzzle_removed', '404 Not Found')
             unless $dbh->selectrow_array('SELECT 1 FROM puzzles WHERE id = ?', undef, $puzzle_id);
         my $state_json = $JSON->encode($state);
         $dbh->do(

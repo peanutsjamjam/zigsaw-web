@@ -127,6 +127,8 @@ const MESSAGES: Record<string, string> = {
   mail_failed: 'メールの送信に失敗しました。時間をおいて試してください。',
   forbidden: 'この操作をする権限がありません。',
   not_found: '見つかりませんでした。',
+  puzzle_removed: 'このパズルは管理者によって削除されました。',
+  quarantine_failed: '退避に失敗しました。サーバーのログを確認してください。',
   db_error: 'サーバーでエラーが発生しました。',
   server_error: 'サーバーでエラーが発生しました。',
 }
@@ -213,6 +215,10 @@ export const api = {
   updateImage: (id: number, display_name: string, tags: string[]) =>
     request<{ image: GalleryImage }>(`?action=image&id=${id}`, { method: 'PUT', body: JSON.stringify({ display_name, tags }) }).then((r) => r.image),
   deleteImage: (id: number) => request<{ ok: true }>(`?action=image&id=${id}`, { method: 'DELETE' }),
+  // 緊急退避（管理者のみ）。画像・パズル・進捗をアプリから消し、実ファイルと消す前の
+  // 内容をサーバー上の退避先へ移す。
+  quarantineImage: (id: number) =>
+    postJson<{ ok: true; dir: string; puzzles: number; progress: number }>(`?action=image_quarantine&id=${id}`, {}),
 
   puzzles: (page: number, perPage: number, filter?: ListFilter) =>
     request<{ puzzles: Puzzle[]; total: number }>(`?action=puzzles&${listQuery(page, perPage, filter)}`),

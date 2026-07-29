@@ -3,8 +3,8 @@
 //   「パズル一覧」  … 作成済みの共有パズル。誰でもプレイできる（未ログインはこの欄のみ）。
 //   「プレイしたパズル」… ログイン中の自分が遊んだパズル（プレイ中／クリア済み）。再開・再挑戦する。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FlaskConical, Plus, Trash2, Triangle, Upload, X } from 'lucide-react'
-import { api, type Account, type GalleryImage, type ListFilter, type ProgressItem, type Puzzle } from '../api'
+import { FlaskConical, Plus, ShieldAlert, Trash2, Triangle, Upload, X } from 'lucide-react'
+import { api, ApiError, type Account, type GalleryImage, type ListFilter, type ProgressItem, type Puzzle } from '../api'
 import { prepareUpload } from '../lib/generator'
 import type { SavedProgress } from '../api'
 import { PLACEHOLDER_WALK_FRAMES, SHAPE_IMAGES } from '../lib/shapes'
@@ -118,6 +118,10 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   const [pending, setPending] = useState<{ file: File; url: string } | null>(null)
   const [pendingName, setPendingName] = useState('')
   const [confirmingRemoval, setConfirmingRemoval] = useState<GalleryImage | null>(null)
+  // 緊急退避（管理者のみ）の確認中の画像と、実行中フラグ・完了通知。
+  const [confirmingQuarantine, setConfirmingQuarantine] = useState<GalleryImage | null>(null)
+  const [quarantining, setQuarantining] = useState(false)
+  const [quarantinedNotice, setQuarantinedNotice] = useState(false)
   const [confirmingPuzzleRemoval, setConfirmingPuzzleRemoval] = useState<Puzzle | null>(null)
   const [confirmingProgressRemoval, setConfirmingProgressRemoval] = useState<ProgressItem | null>(null)
   // 画像情報修正画面での display_name・tags の編集値と、保存中フラグ・完了通知。
@@ -381,6 +385,33 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
     await saveTags(selection.image, selection.image.tags.filter((t) => t !== name))
   }
 
+  // 緊急退避（管理者のみ）。公序良俗に反する投稿などを、その画像・パズル・進捗ごと
+  // アプリから消し、サーバー上の退避先へ移す（無かった状態に戻す）。
+  const quarantineImage = async (image: GalleryImage) => {
+    setQuarantining(true)
+    setError(null)
+    try {
+      try {
+        await api.quarantineImage(image.id)
+      } catch (err) {
+        // サーバーは処理できているのに応答だけ届かないことがある（通信が切れた等）。
+        // 実際にその画像が消えているかを見て、消えていれば成功として扱う。
+        if (err instanceof ApiError) throw err          // サーバーが返したエラーはそのまま
+        const gone = await api.image(image.id).then(() => false, (e) => e instanceof ApiError && e.code === 'not_found')
+        if (!gone) throw err
+      }
+      setConfirmingQuarantine(null)
+      setSelection(null)
+      await reload()
+      setQuarantinedNotice(true)
+      window.setTimeout(() => setQuarantinedNotice(false), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setQuarantining(false)
+    }
+  }
+
   // 「この画像でパズルを作成する」: 従来のピース数決定画面（mode:'create'）へ進む。
   const goToCreate = () => {
     if (selection?.kind !== 'image') return
@@ -508,6 +539,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
   return (
     <div className="setup">
       {createdNotice && <div className="toast">パズルを作成しました</div>}
+      {quarantinedNotice && <div className="toast">画像を退避しました</div>}
 
       {/* 上段: タイトル＋選択中の詳細（常に見える。スクロールしない）。 */}
       <div className={`setup-head${headCollapsed ? ' collapsed' : ''}`}>
@@ -541,6 +573,18 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           <button type="button" className="selection-close" onClick={() => setSelection(null)} aria-label="閉じる" title="閉じる">
             <X size={18} />
           </button>
+          {/* 緊急退避。管理者が画像情報画面を開いているときだけ、× の左に出す。 */}
+          {account?.is_admin && selection.kind === 'image' && selection.mode === 'edit' && (
+            <button
+              type="button"
+              className="selection-close selection-quarantine"
+              onClick={() => setConfirmingQuarantine(selection.image)}
+              aria-label="この画像を緊急退避する"
+              title="緊急退避（この画像・パズル・進捗をアプリから消して隔離する）"
+            >
+              <ShieldAlert size={18} />
+            </button>
+          )}
           {/* 画面名（カード左上に小さく）。画像一覧から開いた画像情報編集画面のときだけ出す。 */}
           {selection.kind === 'image' && selection.mode === 'edit' && (
             <div className="selection-name">画像情報</div>
@@ -1167,6 +1211,38 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
                 削除
               </button>
               <button type="button" className="btn" onClick={() => setConfirmingRemoval(null)}>キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 緊急退避の確認（管理者のみ）。何が消えるかを具体的に見せてから実行する。 */}
+      {confirmingQuarantine && (
+        <div className="overlay dim">
+          <div className="panel">
+            <h2>この画像を緊急退避しますか？</h2>
+            <img className="upload-preview" src={confirmingQuarantine.thumb_url} alt="" />
+            <p className="muted">
+              「{confirmingQuarantine.display_name}」と、この画像から作られたパズル・
+              それを遊んでいる人の途中経過を、すべてアプリから消します。
+              消したものはサーバー上の退避先へ移すので、あとから確認できます。
+              遊んでいる人には、次にサーバーへつないだ時点で削除が伝わり、ゲームが終わります。
+            </p>
+            <div className="row">
+              <button
+                type="button" className="btn danger"
+                onClick={() => void quarantineImage(confirmingQuarantine)}
+                disabled={quarantining}
+              >
+                {quarantining ? '退避中…' : '退避する'}
+              </button>
+              <button
+                type="button" className="btn"
+                onClick={() => setConfirmingQuarantine(null)}
+                disabled={quarantining}
+              >
+                キャンセル
+              </button>
             </div>
           </div>
         </div>

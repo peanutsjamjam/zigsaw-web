@@ -2,7 +2,7 @@
 // mac 版 Zigsaw の PuzzleBoardView.swift（オーバーレイ部分）と GameCoordinator.swift 相当。
 // 途中経過はサーバー（progress API）へ保存する。未ログイン時は保存できない。
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { api } from '../api'
+import { api, ApiError } from '../api'
 import { formatElapsed } from '../lib/format'
 import type { PuzzleGameState } from '../lib/game'
 import type { AppSettings } from '../lib/settings'
@@ -36,6 +36,9 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
   const [confirmingExit, setConfirmingExit] = useState(false)
   // 自動保存が行われた瞬間だけ true にして、HUD の「自動保存」ボタンを一瞬光らせる。
   const [autoSaveFlash, setAutoSaveFlash] = useState(false)
+  // 遊んでいる最中に、管理者がこのパズル（の元画像）を消したときに true。
+  // 保存しようとしたときにサーバーから puzzle_removed が返って分かる。
+  const [puzzleRemoved, setPuzzleRemoved] = useState(false)
   // 最後に保存した時点の visualRevision。自動保存で「変化があったときだけ」保存する判定に使う。
   const lastSavedRevision = useRef(game.visualRevision)
 
@@ -46,7 +49,13 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
     const savedGame = game.exportSavedState(viewState.scale, viewState.panOffset)
     // 完成したパズルは常に完成図を出すので、途中経過の画像は付けない。
     const snapshot = game.isComplete ? undefined : (game.renderSnapshotDataUrl(settings.backgroundColor) ?? undefined)
-    await api.saveProgress(puzzleId, { ...savedGame, snapshot })
+    try {
+      await api.saveProgress(puzzleId, { ...savedGame, snapshot })
+    } catch (err) {
+      // パズルが消えていたら、以後の保存はあきらめて画面で知らせる。
+      if (err instanceof ApiError && err.code === 'puzzle_removed') { setPuzzleRemoved(true); return }
+      throw err
+    }
     lastSavedRevision.current = rev
   }, [canSave, game, puzzleId, settings.backgroundColor])
 
@@ -70,9 +79,12 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
   saveRef.current = save
   const autoSaveRef = useRef(settings.autoSave)
   autoSaveRef.current = settings.autoSave
+  const removedRef = useRef(puzzleRemoved)
+  removedRef.current = puzzleRemoved
   useEffect(() => {
     if (!canSave) return
     const timer = window.setInterval(() => {
+      if (removedRef.current) return
       if (!autoSaveRef.current || game.isComplete) return
       if (game.visualRevision === lastSavedRevision.current) return
       void saveRef.current().then(() => {
@@ -145,6 +157,22 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
           <div className="panel">
             <h2>完成しました！</h2>
             <p className="muted">所要時間: {formatElapsed(game.elapsedSeconds)}</p>
+          </div>
+        </div>
+      )}
+
+      {/* 遊んでいる最中に管理者が消したとき。閉じる手立ては「戻る」だけにする。 */}
+      {puzzleRemoved && (
+        <div className="overlay dim">
+          <div className="panel">
+            <h2>このパズルは削除されました</h2>
+            <p className="muted">
+              管理者によって、このパズル（と元の画像）が削除されました。
+              これ以上は保存できないため、ゲームを終了します。
+            </p>
+            <div className="row">
+              <button type="button" className="btn primary" onClick={onExit}>選択画面に戻る</button>
+            </div>
           </div>
         </div>
       )}
