@@ -4,6 +4,11 @@ RewriteEngine On
 # .cgi を CGI スクリプトとして実行
 AddHandler cgi-script .cgi
 
+# リクエストボディの上限。画像アップロード（デコード後 8MB まで）が base64 で
+# 約 4/3 に膨らむぶんの余裕をみた値。api.cgi の $MAX_BODY_BYTES と揃えること。
+# ここで弾ければ CGI プロセスが起動する前に 413 を返せる。
+LimitRequestBody 12582912
+
 # 画像は宣言どおりの Content-Type で扱わせ、内容からの MIME 推測（sniffing）を無効化する。
 # 万一おかしなファイルが images/ に混じっても HTML/JS として実行させないための多層防御。
 <If "%{REQUEST_URI} =~ m#/images/#">

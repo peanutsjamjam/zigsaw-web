@@ -123,6 +123,7 @@ const MESSAGES: Record<string, string> = {
   image_write_failed: '画像の保存に失敗しました。',
   grid_invalid: 'ピース数の指定が正しくありません（縦横それぞれ2〜40）。',
   bad_request: 'リクエストが正しくありません。',
+  payload_too_large: '送信されたデータが大きすぎます。',
   puzzle_in_use: 'このパズルは、すでにプレイしている人がいるため削除できません。',
   mail_failed: 'メールの送信に失敗しました。時間をおいて試してください。',
   forbidden: 'この操作をする権限がありません。',

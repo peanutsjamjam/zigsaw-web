@@ -23,8 +23,8 @@ let nextSessionId = 1
 export default function App() {
   const [settings, setSettings] = useState<AppSettings>(loadSettings)
   const [account, setAccount] = useState<Account | null>(null)
-  // 実行環境が development のときだけ、開発用フラスコボタンを出す（env.pl 由来）。
-  const [isDev, setIsDev] = useState(false)
+  // 実行環境が development かどうか（env.pl 由来）。フラスコボタンの表示条件のひとつ。
+  const [isDevEnv, setIsDevEnv] = useState(false)
   const [booted, setBooted] = useState(false)
   const [showAuth, setShowAuth] = useState(false)
   // 開発用フラスコ画面を出しているか（開発環境のみ）。
@@ -47,8 +47,12 @@ export default function App() {
 
   // 実行環境を取得して、開発環境のときだけフラスコボタンを表示する。
   useEffect(() => {
-    api.env().then((r) => setIsDev(r.env === 'development')).catch(() => { /* 取得失敗時は非表示のまま */ })
+    api.env().then((r) => setIsDevEnv(r.env === 'development')).catch(() => { /* 取得失敗時は非表示のまま */ })
   }, [])
+
+  // 開発用画面は開発環境の管理者だけに見せる。実際の遮断はサーバ側（dev_* が 404 を返す）で、
+  // ここは管理者以外に押しても無駄なボタンを見せないための表示制御。
+  const isDev = isDevEnv && account?.is_admin === true
 
   // ブラウザは利用者の操作なしに音を鳴らせないので、最初のクリックで用意する。
   useEffect(() => {

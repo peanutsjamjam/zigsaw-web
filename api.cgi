@@ -40,9 +40,10 @@ use File::Basename qw(dirname);
 #   DELETE ?action=account                          -> アカウント削除（progress は CASCADE 削除、
 #                                                      アップロード画像は owner_id が NULL になり残る）
 #   GET    ?action=me                               -> {username,email,is_admin} or 401
-#   GET    ?action=dev_storage                      -> 画像ディレクトリの画像数/合計サイズ・FSの空き/総容量（開発環境のみ）
-#   GET    ?action=dev_users                        -> 全ユーザー一覧（開発環境のみ。本番は404。salt/iterations は返さない）
-#   GET    ?action=dev_user_detail&id=<uid>         -> 指定ユーザーの画像/パズル/保存ゲーム（開発環境のみ）
+#   （dev_* は「開発環境」かつ「管理者でログイン中」のときだけ応答する。どちらか欠けると 404）
+#   GET    ?action=dev_storage                      -> 画像ディレクトリの画像数/合計サイズ・FSの空き/総容量
+#   GET    ?action=dev_users                        -> 全ユーザー一覧（salt/iterations は返さない）
+#   GET    ?action=dev_user_detail&id=<uid>         -> 指定ユーザーの画像/パズル/保存ゲーム
 #   GET    ?action=images[&page=&per_page=&tag=&tag=&mine=1&pieces=2-50,401-]
 #                                                   -> アップロード画像一覧（未ログインでも可）。
 #                                                      {images,total,page,per_page}。絞り込み・
@@ -86,6 +87,11 @@ my $RESET_TOKEN_HOURS  = 1;
 my $MAIL_FROM    = 'zigsaw@peanutsjamjam.jp';
 # アップロード画像の最大バイト数（full/thumb それぞれの、デコード後のサイズ）。
 my $MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+# リクエストボディの最大バイト数。画像は base64 で約 4/3 に膨らむので、その余裕をみる。
+# Apache 側の LimitRequestBody（.htaccess）と同じ値にしておくこと。
+my $MAX_BODY_BYTES = 12 * 1024 * 1024;
+# progress の state（プレイ中の盤面スナップショット）の最大バイト数（JSON エンコード後）。
+my $MAX_STATE_BYTES = 1024 * 1024;
 
 # ---- レート制限のしきい値（rate_events テーブルで直近件数を数える） --------
 # login: 直近 $LOGIN_WINDOW_MIN 分の失敗が、同一メール/同一IPでこの回数以上なら一時的に拒否。
@@ -188,6 +194,9 @@ sub query_params {
 sub read_body_json {
     my $length = $ENV{CONTENT_LENGTH} || 0;
     return {} if $length <= 0;
+    # 読み込む前に上限で弾く。通常は Apache の LimitRequestBody が先に 413 を返すが、
+    # そちらの設定が失われてもメモリを食い潰さないよう、ここでも見る。
+    fail('payload_too_large', '413 Payload Too Large') if $length > $MAX_BODY_BYTES;
     my $raw = '';
     my $got = 0;
     # 大きめのアップロードでも取りこぼさないよう、必要分を読み切る。
@@ -456,6 +465,16 @@ sub require_user {
     my ($dbh) = @_;
     my $u = current_user($dbh);
     fail('not_authenticated', '401 Unauthorized') unless $u;
+    return $u;
+}
+
+# 管理者専用エンドポイント用。未ログイン・非管理者はどちらも 404 で返す
+# （401/403 で返し分けると、そのエンドポイントの存在自体を教えてしまう）。
+sub require_admin {
+    my ($dbh) = @_;
+    my $u = current_user($dbh);
+    fail('not_found', '404 Not Found')
+        unless $u && pgbool($u->{is_admin}) == JSON::PP::true;
     return $u;
 }
 
@@ -931,8 +950,9 @@ eval {
     }
     elsif ($action eq 'dev_storage' && $method eq 'GET') {
         # 開発用: 画像ディレクトリのファイル数・合計サイズと、それが載っている
-        # ファイルシステムの総容量・空き容量。開発環境でのみ有効。
+        # ファイルシステムの総容量・空き容量。開発環境の管理者でのみ有効。
         fail('not_found', '404 Not Found') unless $ZIGSAW_ENV eq 'development';
+        require_admin($dbh);
 
         # 画像数は full/ のファイル数（画像1枚につき full が1つ）。
         # 合計サイズは images ディレクトリ全体（full/thumb/incoming）の実ファイルの総和。
@@ -968,9 +988,10 @@ eval {
         });
     }
     elsif ($action eq 'dev_users' && $method eq 'GET') {
-        # 開発用: 全ユーザーの一覧。開発環境でのみ有効（本番では 404 扱い）。
+        # 開発用: 全ユーザーの一覧。開発環境の管理者でのみ有効（本番では 404 扱い）。
         # 認証情報（password_hash / salt / iterations）は返さない。
         fail('not_found', '404 Not Found') unless $ZIGSAW_ENV eq 'development';
+        require_admin($dbh);
         my $rows = $dbh->selectall_arrayref(
             'SELECT u.id, u.username, u.email, u.is_admin, u.created_at,
                     (SELECT count(*) FROM images   i  WHERE i.owner_id   = u.id) AS image_count,
@@ -1005,7 +1026,9 @@ eval {
     }
     elsif ($action eq 'dev_user_detail' && $method eq 'GET') {
         # 開発用: 指定ユーザーが登録した画像・作成したパズル・保存したゲーム（progress）。
+        # 開発環境の管理者でのみ有効。
         fail('not_found', '404 Not Found') unless $ZIGSAW_ENV eq 'development';
+        require_admin($dbh);
         my $uid = int(query_param('id') || 0);
         fail('bad_request') if $uid < 1;
         my $base = app_base_url();
@@ -1405,6 +1428,9 @@ eval {
         fail('puzzle_removed', '404 Not Found')
             unless $dbh->selectrow_array('SELECT 1 FROM puzzles WHERE id = ?', undef, $puzzle_id);
         my $state_json = $JSON->encode($state);
+        # 自動保存で 60 秒ごとに書き込まれる経路なので、1件あたりの上限を設ける。
+        fail('payload_too_large', '413 Payload Too Large')
+            if length($state_json) > $MAX_STATE_BYTES;
         $dbh->do(
             'INSERT INTO progress (user_id, puzzle_id, state, updated_at)
              VALUES (?,?,?, now())
