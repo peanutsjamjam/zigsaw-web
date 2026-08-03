@@ -27,6 +27,9 @@ images/incoming/
 .DS_Store
 *.sw?
 
+# テストのサンドボックス（t/ が毎回作り直す）
+t/tmp/
+
 # 作業指示メモ（リポジトリには含めない）
 order.txt
 memo.txt

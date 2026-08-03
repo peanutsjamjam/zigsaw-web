@@ -114,6 +114,15 @@ our $ZIGSAW_ENV = 'unknown';
 # env.pl で $main::ZIGSAW_BASE_URL に設定する。メール内リンク等の絶対 URL 生成に使い、
 # これがあると Host ヘッダに依存しない（＝リセットリンク等の Host インジェクションを防ぐ）。
 our $ZIGSAW_BASE_URL = '';
+# 接続する PostgreSQL のデータベース名。テスト（t/）がサンドボックスの env.pl で
+# 専用 DB（zigsaw_test）に差し替える。dev / 本番では既定値のまま使う。
+our $ZIGSAW_DB = 'zigsaw';
+# sendmail のパス。テストでは送信内容をファイルに記録する偽 sendmail に差し替える。
+our $ZIGSAW_SENDMAIL = '/usr/sbin/sendmail';
+# 緊急退避（公序良俗に反する投稿などを、管理者がアプリから消して隔離する）先。
+# 実ファイルと、消す前の DB の行（画像・パズル・進捗・タグ）をここに書き出す。
+# dev / 本番で同じ場所を使う。書き込めるよう ACL で apache と sugawara に rwx を与えてある。
+our $ZIGSAW_QUARANTINE_DIR = '/home/zigsaw/quarantine';
 {
     my $env_file = dirname(__FILE__) . '/env.pl';
     require $env_file if -f $env_file;
@@ -121,11 +130,6 @@ our $ZIGSAW_BASE_URL = '';
 
 # 画像の実ファイルを置くディレクトリ（api.cgi と同じ場所を基準にする）。
 my $IMAGE_DIR = dirname(__FILE__) . '/images';
-
-# 緊急退避（公序良俗に反する投稿などを、管理者がアプリから消して隔離する）先。
-# 実ファイルと、消す前の DB の行（画像・パズル・進捗・タグ）をここに書き出す。
-# dev / 本番で同じ場所を使う。書き込めるよう ACL で apache と sugawara に rwx を与えてある。
-my $QUARANTINE_DIR = '/home/zigsaw/quarantine';
 
 my $JSON = JSON::PP->new->utf8->canonical;
 
@@ -266,7 +270,7 @@ sub Scalar_true { my $v = shift; return (!ref($v) && $v =~ /^\d+$/ && $v != 0) ?
 # ---- DB --------------------------------------------------------------------
 sub db {
     my $dbh = DBI->connect(
-        'dbi:Pg:dbname=zigsaw', '', '',
+        "dbi:Pg:dbname=$ZIGSAW_DB", '', '',
         { RaiseError => 1, AutoCommit => 1, PrintError => 0, pg_enable_utf8 => 1 }
     ) or fail('db_error', '500 Internal Server Error');
     return $dbh;
@@ -382,7 +386,7 @@ sub send_mail {
     my ($to, $subject, $body) = @_;
     utf8::encode($body) if utf8::is_utf8($body);
     my $ok = eval {
-        open(my $mh, '|-', '/usr/sbin/sendmail', '-t', '-i') or die "sendmail: $!";
+        open(my $mh, '|-', $ZIGSAW_SENDMAIL, '-t', '-i') or die "sendmail: $!";
         print $mh "From: Zigsaw <$MAIL_FROM>\r\n";
         print $mh "To: $to\r\n";
         print $mh "Subject: " . mime_word($subject) . "\r\n";
@@ -1252,11 +1256,11 @@ eval {
         my @now = localtime;
         my $stamp = sprintf('%04d%02d%02d-%02d%02d%02d',
                             $now[5] + 1900, $now[4] + 1, $now[3], $now[2], $now[1], $now[0]);
-        my $dir = "$QUARANTINE_DIR/$stamp-image$id";
+        my $dir = "$ZIGSAW_QUARANTINE_DIR/$stamp-image$id";
         my $full  = "$IMAGE_DIR/full/$image->{basename}.$image->{ext}";
         my $thumb = "$IMAGE_DIR/thumb/$image->{basename}.jpg";
         my $moved = eval {
-            mkdir $QUARANTINE_DIR unless -d $QUARANTINE_DIR;
+            mkdir $ZIGSAW_QUARANTINE_DIR unless -d $ZIGSAW_QUARANTINE_DIR;
             mkdir $dir or die "mkdir $dir: $!";
             my $meta = {
                 removed_at => $stamp,
