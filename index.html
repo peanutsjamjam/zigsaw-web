@@ -5,10 +5,44 @@
     <!-- タイトル右のオレンジのピース（src/assets/shapes/shape_004.png）を、余白を落として 128px にしたもの。 -->
     <link rel="icon" type="image/png" href="./favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Zigsaw — ジグソーパズル</title>
+    <title>Zigsaw — ブラウザで無料で遊べるジグソーパズル。好きな画像でパズルを作成</title>
+    <!-- 検索エンジン向けの情報。本文は JS で描画される SPA なので、
+         クロール時に内容が伝わるようここでアプリの説明をまとめて宣言する。 -->
+    <meta name="description" content="Zigsaw はブラウザだけで遊べる無料のジグソーパズルです。インストール不要。アカウント登録すると、好きな画像をアップロードしてオリジナルのジグソーパズルを作成し、みんなと共有して遊べます。途中経過の保存にも対応。" />
+    <!-- 開発環境 (peanutsjamjam.jp/~sugawara/zigsaw/) にも同じページが出るため、
+         検索エンジンには本番 URL を正とするよう canonical で示す。 -->
+    <link rel="canonical" href="https://zigsaw.peanutsjamjam.jp/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Zigsaw" />
+    <meta property="og:title" content="Zigsaw — ブラウザで無料で遊べるジグソーパズル" />
+    <meta property="og:description" content="インストール不要・無料のジグソーパズル。好きな画像でオリジナルパズルを作成して共有できます。" />
+    <meta property="og:url" content="https://zigsaw.peanutsjamjam.jp/" />
+    <meta property="og:image" content="https://zigsaw.peanutsjamjam.jp/favicon.png" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta name="twitter:card" content="summary" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Zigsaw",
+      "url": "https://zigsaw.peanutsjamjam.jp/",
+      "description": "ブラウザだけで遊べる無料のジグソーパズル。好きな画像をアップロードしてオリジナルのパズルを作成し、共有して遊べる。",
+      "applicationCategory": "GameApplication",
+      "operatingSystem": "Web",
+      "inLanguage": "ja",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "JPY" }
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <!-- JS を実行しないクローラー・環境向けの説明文（通常は表示されない）。 -->
+    <noscript>
+      <h1>Zigsaw — ブラウザで遊べる無料ジグソーパズル</h1>
+      <p>Zigsaw はウェブブラウザだけで遊べる無料のジグソーパズルです。インストールは不要です。</p>
+      <p>アカウントを登録すると、好きな画像をアップロードしてピース数を選び、オリジナルのジグソーパズルを作成できます。作成したパズルは共有ギャラリーに並び、誰でもプレイできます。途中経過は自動で保存され、いつでも続きから再開できます。</p>
+      <p>このページの表示には JavaScript が必要です。</p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

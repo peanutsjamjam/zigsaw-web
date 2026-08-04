@@ -1189,6 +1189,12 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
           </div>
         </Section>
       )}
+
+      {/* アプリ紹介。一覧を最後まで見た訪問者と、ページを巡回する検索エンジンの両方に向けた説明文。 */}
+      <footer className="setup-about muted">
+        <p>Zigsaw は、ウェブブラウザだけで遊べる無料のジグソーパズルです。インストールは不要です。</p>
+        <p>アカウントを登録すると、好きな画像をアップロードしてピース数を選び、オリジナルのジグソーパズルを作成できます。作成したパズルは「パズル一覧」で共有され、誰でもプレイできます。ログインして遊ぶと途中経過が自動で保存され、いつでも続きから再開できます。</p>
+      </footer>
       </div>
 
       {confirmingRemoval && (

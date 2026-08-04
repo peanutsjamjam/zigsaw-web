@@ -1,0 +1,11 @@
+# zigsaw.peanutsjamjam.jp のクロール指示。public/ に置くと dist/ にコピーされ、
+# .htaccess の書き換えで https://zigsaw.peanutsjamjam.jp/robots.txt として配信される。
+# （開発 URL は /~sugawara/zigsaw/ 配下なので robots.txt としては効かない。
+#   開発 URL の重複回避は index.html の canonical で行う。）
+User-agent: *
+Allow: /
+# CGI とビルド成果物ディレクトリはクロール不要
+Disallow: /api.cgi
+Disallow: /ddl/
+
+Sitemap: https://zigsaw.peanutsjamjam.jp/sitemap.xml

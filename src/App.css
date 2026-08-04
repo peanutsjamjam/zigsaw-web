@@ -125,6 +125,18 @@
    パディング自体を消して合わせる）。 */
 .setup-lists.collapsed { padding-top: 0; }
 
+/* 一覧の下のアプリ紹介文。控えめに、区切り線で一覧と分ける。 */
+.setup-about {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  line-height: 1.7;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .setup-top {
   align-self: stretch;
   display: grid;
