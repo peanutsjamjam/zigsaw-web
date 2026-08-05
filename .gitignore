@@ -17,8 +17,6 @@ env.pl
 # アプリデータ（アップロード/管理者設置の画像の実ファイル・whois キャッシュ）への
 # シンボリックリンク。実体は /var/jp.peanutsjamjam.zigsaw.appdata（git 管理外）。
 /appdata
-# 旧リンク名（appdata への移行が済んだら消してよい）
-/images
 
 # Editor directories and files
 .vscode/*
