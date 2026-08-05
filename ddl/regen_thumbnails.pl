@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# 既存画像のサムネイル（images/thumb/<basename>.<ext>）を、full 画像から
+# 既存画像のサムネイル（appdata/thumb/<basename>.<ext>）を、full 画像から
 # GraphicsMagick で作り直す保守スクリプト。
 #
 # 背景: 以前の seed_images.pl は full をそのまま thumb にコピーしていたため、
@@ -17,7 +17,7 @@ use Cwd qw(abs_path);
 
 my $SCRIPT_DIR = dirname(abs_path(__FILE__));
 my $ROOT       = dirname($SCRIPT_DIR);
-my $IMAGE_DIR  = "$ROOT/images";
+my $APPDATA_DIR  = "$ROOT/appdata";
 
 my $GM_BIN    = '/usr/bin/gm';
 my $THUMB_MAX = 600;
@@ -42,10 +42,10 @@ printf "対象 %d 件（%s）%s\n", scalar(@$rows),
 
 my ($ok, $skip, $fail, $before_total, $after_total) = (0, 0, 0, 0, 0);
 for my $r (@$rows) {
-    my $full  = "$IMAGE_DIR/full/$r->{basename}.$r->{ext}";
+    my $full  = "$APPDATA_DIR/full/$r->{basename}.$r->{ext}";
     # サムネは常に JPEG（.jpg）に統一する。full が png/webp/gif でも thumb は .jpg。
-    my $thumb     = "$IMAGE_DIR/thumb/$r->{basename}.jpg";
-    my $old_thumb = "$IMAGE_DIR/thumb/$r->{basename}.$r->{ext}";   # 旧命名（同じこともある）
+    my $thumb     = "$APPDATA_DIR/thumb/$r->{basename}.jpg";
+    my $old_thumb = "$APPDATA_DIR/thumb/$r->{basename}.$r->{ext}";   # 旧命名（同じこともある）
     unless (-f $full) {
         print "  skip id=$r->{id}: full が無い ($full)\n";
         $skip++;

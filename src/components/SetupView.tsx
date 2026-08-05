@@ -3,7 +3,7 @@
 //   「パズル一覧」  … 作成済みの共有パズル。誰でもプレイできる（未ログインはこの欄のみ）。
 //   「プレイしたパズル」… ログイン中の自分が遊んだパズル（プレイ中／クリア済み）。再開・再挑戦する。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FlaskConical, Plus, ShieldAlert, Trash2, Triangle, Upload, X } from 'lucide-react'
+import { FlaskConical, FlaskRound, Plus, ShieldAlert, Trash2, Triangle, Upload, X } from 'lucide-react'
 import { api, ApiError, type Account, type GalleryImage, type ListFilter, type ProgressItem, type Puzzle } from '../api'
 import { prepareUpload } from '../lib/generator'
 import type { SavedProgress } from '../api'
@@ -40,6 +40,8 @@ type Props = {
   onStart: (req: StartRequest) => void
   /** フラスコボタン: 画面全体を開発用ビューへ切り替える。 */
   onOpenDev: () => void
+  /** 2つ目のフラスコボタン: 画面全体をアクセスログのダイジェストへ切り替える。 */
+  onOpenDevLog: () => void
   onRequestLogin: () => void
   onLoggedOut: () => void
   busy: boolean
@@ -90,7 +92,7 @@ function filtersLabel(filters: Filter[]): string {
   return filters.map(filterLabel).join('・')
 }
 
-export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, onLoggedOut, busy }: Props) {
+export function SetupView({ account, isDev, onStart, onOpenDev, onOpenDevLog, onRequestLogin, onLoggedOut, busy }: Props) {
   // images / puzzles は「いま表示しているページのぶんだけ」。総件数は total で持つ。
   const [images, setImages] = useState<GalleryImage[]>([])
   const [imagesTotal, setImagesTotal] = useState(0)
@@ -559,6 +561,17 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onRequestLogin, 
               onClick={onOpenDev}
             >
               <FlaskConical size={18} />
+            </button>
+          )}
+          {isDev && (
+            <button
+              type="button"
+              className="icon-btn dev-btn"
+              title="アクセスログ（開発環境のみ）"
+              aria-label="アクセスログ"
+              onClick={onOpenDevLog}
+            >
+              <FlaskRound size={18} />
             </button>
           )}
           <AccountMenu account={account} onRequestLogin={onRequestLogin} onLoggedOut={onLoggedOut} />

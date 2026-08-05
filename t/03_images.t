@@ -68,12 +68,12 @@ is $img->{width}, 800, 'アップロード: width は数値';
 ok $img->{mine}, 'アップロード: mine=true';
 is $img->{owner}, 'alice', 'アップロード: owner はユーザー名';
 is $img->{upload_ip}, '127.0.0.1', 'アップロード: upload_ip が記録される';
-like $img->{full_url},  qr{^https://test\.invalid/zigsaw/images/full/[0-9a-f]{32}\.png$},  'アップロード: full_url';
-like $img->{thumb_url}, qr{^https://test\.invalid/zigsaw/images/thumb/[0-9a-f]{32}\.jpg$}, 'アップロード: thumb は常に .jpg';
+like $img->{full_url},  qr{^https://test\.invalid/zigsaw/appdata/full/[0-9a-f]{32}\.png$},  'アップロード: full_url';
+like $img->{thumb_url}, qr{^https://test\.invalid/zigsaw/appdata/thumb/[0-9a-f]{32}\.jpg$}, 'アップロード: thumb は常に .jpg';
 
 my ($basename) = $img->{full_url} =~ m{/([0-9a-f]{32})\.png$};
-ok -f image_dir() . "/full/$basename.png",  'アップロード: full の実ファイルが書かれる';
-ok -f image_dir() . "/thumb/$basename.jpg", 'アップロード: thumb の実ファイルが書かれる';
+ok -f appdata_dir() . "/full/$basename.png",  'アップロード: full の実ファイルが書かれる';
+ok -f appdata_dir() . "/thumb/$basename.jpg", 'アップロード: thumb の実ファイルが書かれる';
 my $img1 = $img->{id};
 
 # jpeg は jpg に正規化。display_name 空は untitled。
@@ -184,8 +184,8 @@ my $base3 = db_scalar("SELECT basename FROM images WHERE id = $img3");
 $res = api_delete(action => 'image', query => { id => $img3 }, sid => $alice);
 is $res->{status}, 200, '削除: 本人は削除できる';
 is db_scalar("SELECT count(*) FROM images WHERE id = $img3"), '0', '削除: DB の行が消える';
-ok !-f image_dir() . "/full/$base3.png", '削除: full の実ファイルが消える';
-ok !-f image_dir() . "/thumb/$base3.jpg", '削除: thumb の実ファイルが消える';
+ok !-f appdata_dir() . "/full/$base3.png", '削除: full の実ファイルが消える';
+ok !-f appdata_dir() . "/thumb/$base3.jpg", '削除: thumb の実ファイルが消える';
 
 $res = api_delete(action => 'image', query => { id => $img2 }, sid => $adm);
 is $res->{status}, 200, '削除: 管理者は他人の画像も削除できる';

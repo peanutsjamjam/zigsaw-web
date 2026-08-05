@@ -7,6 +7,7 @@ use JSON::PP;
 use Digest::SHA qw(hmac_sha256);
 use MIME::Base64 ();
 use File::Basename qw(dirname);
+use Socket qw(inet_pton AF_INET AF_INET6);
 
 # Zigsaw (ジグソーパズル) API  (CGI / Perl + PostgreSQL)
 #
@@ -20,7 +21,7 @@ use File::Basename qw(dirname);
 #        未ログインでもギャラリー閲覧・プレイはできる（保存だけできない）。
 #
 # 画像:  みんなで遊べる共有ギャラリー。実ファイルは api.cgi と同じディレクトリの
-#        images/full（遊ぶ用の縮小画像）と images/thumb（一覧用サムネ）に置く。
+#        appdata/full（遊ぶ用の縮小画像）と appdata/thumb（一覧用サムネ）に置く。
 #        縮小もサムネ生成もクライアント側で行い、アップロードは base64 で受け取って
 #        バイトを書くだけ（サーバーに画像処理系が無いため）。
 #
@@ -44,6 +45,8 @@ use File::Basename qw(dirname);
 #   GET    ?action=dev_storage                      -> 画像ディレクトリの画像数/合計サイズ・FSの空き/総容量
 #   GET    ?action=dev_users                        -> 全ユーザー一覧（salt/iterations は返さない）
 #   GET    ?action=dev_user_detail&id=<uid>         -> 指定ユーザーの画像/パズル/保存ゲーム
+#   GET    ?action=dev_access_log                   -> access_log のダイジェスト（IP ごとに最新の1行。
+#                                                      whois で調べた Organization 付き）
 #   GET    ?action=images[&page=&per_page=&tag=&tag=&mine=1&pieces=2-50,401-]
 #                                                   -> アップロード画像一覧（未ログインでも可）。
 #                                                      {images,total,page,per_page}。絞り込み・
@@ -123,13 +126,20 @@ our $ZIGSAW_SENDMAIL = '/usr/sbin/sendmail';
 # 実ファイルと、消す前の DB の行（画像・パズル・進捗・タグ）をここに書き出す。
 # dev / 本番で同じ場所を使う。書き込めるよう ACL で apache と sugawara に rwx を与えてある。
 our $ZIGSAW_QUARANTINE_DIR = '/home/zigsaw/quarantine';
+# whois コマンドのパス（dev_access_log の Organization 表示に使う）。
+# テストでは決まった応答を返す偽 whois に差し替える。
+our $ZIGSAW_WHOIS = '/usr/bin/whois';
 {
     my $env_file = dirname(__FILE__) . '/env.pl';
     require $env_file if -f $env_file;
 }
 
-# 画像の実ファイルを置くディレクトリ（api.cgi と同じ場所を基準にする）。
-my $IMAGE_DIR = dirname(__FILE__) . '/images';
+# アプリデータ（画像の実ファイル・whois キャッシュ）を置くディレクトリ
+# （api.cgi と同じ場所を基準にする）。
+my $APPDATA_DIR = dirname(__FILE__) . '/appdata';
+# whois の結果をキャッシュするディレクトリ（無ければ使うときに作る）。
+# appdata/ はシンボリックリンクなので、実体は /var/jp.peanutsjamjam.zigsaw.appdata/whois になる。
+my $WHOIS_CACHE_DIR = "$APPDATA_DIR/whois";
 
 my $JSON = JSON::PP->new->utf8->canonical;
 
@@ -296,6 +306,104 @@ sub purge_old_access_log {
             undef, $ACCESS_LOG_KEEP_DAYS);
         1;
     } or warn "purge_old_access_log failed: $@\n";
+}
+
+# ---- whois（dev_access_log の Organization 表示） ---------------------------
+# IP アドレスを whois で調べ、Organization の値を返す。結果はアドレス範囲
+# （NetRange / inetnum）ごとに $WHOIS_CACHE_DIR に JSON で1ファイルずつ保存し、
+# 同じ範囲に入る IP については whois コマンドを叩き直さない。
+
+# IP 文字列をバイト列にする（範囲比較用。v4/v6 とも網羅。不正な形式なら undef）。
+# ネットワークバイトオーダーの固定長なので、同じ長さどうしの文字列比較が数値比較になる。
+sub ip_pack {
+    my ($ip) = @_;
+    return undef unless defined $ip && $ip =~ /^[0-9A-Fa-f.:]+$/;
+    return inet_pton($ip =~ /:/ ? AF_INET6 : AF_INET, $ip);
+}
+
+# キャッシュから $ip を含む範囲のエントリを探す。無ければ undef。
+sub whois_cache_find {
+    my ($ip) = @_;
+    my $packed = ip_pack($ip) or return undef;
+    opendir(my $dh, $WHOIS_CACHE_DIR) or return undef;
+    while (defined(my $name = readdir $dh)) {
+        next unless $name =~ /\.json$/;
+        my $entry = eval {
+            open my $fh, '<:raw', "$WHOIS_CACHE_DIR/$name" or die $!;
+            local $/; $JSON->decode(scalar <$fh>);
+        } or next;
+        my $s = ip_pack($entry->{start});
+        my $e = ip_pack($entry->{end});
+        next unless defined $s && defined $e && length($s) == length($packed);
+        return $entry if $packed ge $s && $packed le $e;
+    }
+    return undef;
+}
+
+# whois コマンドを実行して出力を返す。失敗・タイムアウト時は空文字列。
+sub whois_fetch {
+    my ($ip) = @_;
+    my $out = '';
+    eval {
+        local $SIG{ALRM} = sub { die "whois timeout\n" };
+        alarm 10;
+        open(my $fh, '-|', $ZIGSAW_WHOIS, $ip) or die "exec: $!\n";
+        local $/; $out = <$fh> // '';
+        close $fh;
+        alarm 0;
+        1;
+    } or do { alarm 0; $out = ''; warn "whois $ip failed: $@" };
+    # RIR によっては非 ASCII が混ざる（JPNIC など）。UTF-8 なら文字列として扱う。
+    utf8::decode($out);
+    return $out;
+}
+
+# whois 出力からアドレス範囲と Organization を抜き出す。
+#   範囲: NetRange（ARIN）/ inetnum・inet6num（APNIC・RIPE）の「開始 - 終了」形式。
+#   組織: Organization（ARIN）を第一候補に、OrgName / org-name / descr の順で拾う。
+sub whois_parse {
+    my ($out) = @_;
+    my ($start, $end);
+    if ($out =~ /^\s*(?:NetRange|inet6?num):\s*([0-9A-Fa-f.:]+)\s*-\s*([0-9A-Fa-f.:]+)\s*$/mi) {
+        ($start, $end) = ($1, $2);
+    }
+    my $org;
+    for my $re (qr/^\s*Organization:\s*(.+?)\s*$/mi, qr/^\s*OrgName:\s*(.+?)\s*$/mi,
+                qr/^\s*org-name:\s*(.+?)\s*$/mi,     qr/^\s*descr:\s*(.+?)\s*$/mi) {
+        if ($out =~ $re) { $org = $1; last }
+    }
+    return ($start, $end, $org);
+}
+
+# $ip の Organization を返す（キャッシュ優先。分からなければ undef）。
+sub whois_org_for_ip {
+    my ($ip) = @_;
+    return undef unless defined ip_pack($ip);
+    if (my $hit = whois_cache_find($ip)) { return $hit->{organization} }
+
+    my $out = whois_fetch($ip);
+    return undef if $out eq '';   # 失敗は保存しない（次回また試す）
+    my ($start, $end, $org) = whois_parse($out);
+    # 範囲が読み取れない出力だったら、その IP 1つだけの範囲として保存する
+    # （同じ IP で毎回叩き直すのを避ける。Organization 無しでもその事実を保存する）。
+    ($start, $end) = ($ip, $ip)
+        unless defined ip_pack($start) && defined ip_pack($end)
+            && length(ip_pack($start)) == length(ip_pack($end));
+
+    mkdir $WHOIS_CACHE_DIR unless -d $WHOIS_CACHE_DIR;
+    (my $fname = "$start-$end.json") =~ tr/:/_/;   # v6 の ':' はファイル名では '_' にする
+    eval {
+        write_file("$WHOIS_CACHE_DIR/$fname", $JSON->encode({
+            start        => $start,
+            end          => $end,
+            organization => $org,
+            queried_ip   => $ip,
+            fetched_at   => time(),
+            raw          => $out,
+        }));
+        1;
+    } or warn "whois cache write failed: $@";
+    return $org;
 }
 
 # ---- レート制限 ------------------------------------------------------------
@@ -691,8 +799,8 @@ sub image_row_to_json {
         upload_ip     => $row->{upload_ip},         # アップロード元 IP（不明なら null）
         created_at    => $row->{created_at},        # 投稿日時
         mine          => $row->{mine} ? JSON::PP::true : JSON::PP::false,
-        full_url      => "${base_url}images/full/$row->{basename}.$row->{ext}",
-        thumb_url    => "${base_url}images/thumb/$row->{basename}.jpg",   # サムネは常に JPEG
+        full_url      => "${base_url}appdata/full/$row->{basename}.$row->{ext}",
+        thumb_url    => "${base_url}appdata/thumb/$row->{basename}.jpg",   # サムネは常に JPEG
     };
 }
 
@@ -712,8 +820,8 @@ sub puzzle_row_to_json {
         original_name => $row->{original_name},
         width         => 0 + $row->{width},
         height        => 0 + $row->{height},
-        full_url      => "${base_url}images/full/$row->{basename}.$row->{ext}",
-        thumb_url     => "${base_url}images/thumb/$row->{basename}.jpg",   # サムネは常に JPEG
+        full_url      => "${base_url}appdata/full/$row->{basename}.$row->{ext}",
+        thumb_url     => "${base_url}appdata/thumb/$row->{basename}.jpg",   # サムネは常に JPEG
     };
 }
 
@@ -959,11 +1067,11 @@ eval {
         require_admin($dbh);
 
         # 画像数は full/ のファイル数（画像1枚につき full が1つ）。
-        # 合計サイズは images ディレクトリ全体（full/thumb/incoming）の実ファイルの総和。
+        # 合計サイズは appdata ディレクトリの画像置き場（full/thumb/incoming）の実ファイルの総和。
         my $image_count = 0;
         my $total_bytes = 0;
         for my $sub (qw(full thumb incoming)) {
-            my $dir = "$IMAGE_DIR/$sub";
+            my $dir = "$APPDATA_DIR/$sub";
             opendir(my $dh, $dir) or next;
             while (defined(my $name = readdir $dh)) {
                 next if $name eq '.' || $name eq '..';
@@ -977,7 +1085,7 @@ eval {
 
         # df -TP -B1 <images> の2行目: Filesystem Type 総bytes 使用 空き 容量% マウント位置
         my ($fs_type, $fs_total, $fs_free) = ('', 0, 0);
-        my @lines = split /\n/, (`df -TP -B1 '$IMAGE_DIR' 2>/dev/null` || '');
+        my @lines = split /\n/, (`df -TP -B1 '$APPDATA_DIR' 2>/dev/null` || '');
         if (@lines >= 2) {
             my @f = split /\s+/, $lines[1];
             if (@f >= 5) { $fs_type = $f[1]; $fs_total = 0 + $f[2]; $fs_free = 0 + $f[4]; }
@@ -1015,7 +1123,7 @@ eval {
         );
         my %bytes;
         for my $im (@$imgs) {
-            my $path = "$IMAGE_DIR/full/$im->{basename}.$im->{ext}";
+            my $path = "$APPDATA_DIR/full/$im->{basename}.$im->{ext}";
             $bytes{$im->{owner_id}} += (-f $path) ? (stat($path))[7] : 0;
         }
         for my $r (@$rows) {
@@ -1080,6 +1188,30 @@ eval {
             puzzles  => [ map { puzzle_row_to_json($base, $_) } @{ attach_tags($dbh, $puz_rows, 'image_id') } ],
             progress => \@progress,
         });
+    }
+    elsif ($action eq 'dev_access_log' && $method eq 'GET') {
+        # 開発用: access_log のダイジェスト。IP アドレスごとに最新の1行だけを、
+        # 新しい順で返す。開発環境の管理者でのみ有効。
+        fail('not_found', '404 Not Found') unless $ZIGSAW_ENV eq 'development';
+        require_admin($dbh);
+        # DISTINCT ON で IP ごとの最新行を取り、外側で新しい順に並べ替える。
+        # user_id は最新行のもの（未ログインのアクセスなら NULL）。
+        my $rows = $dbh->selectall_arrayref(
+            'SELECT t.id, t.ip_addr, t.user_id, t.username, t.accessed_at FROM (
+                SELECT DISTINCT ON (a.ip_addr)
+                       a.id, host(a.ip_addr) AS ip_addr, a.user_id, u.username, a.accessed_at
+                  FROM access_log a LEFT JOIN users u ON u.id = a.user_id
+                 ORDER BY a.ip_addr, a.accessed_at DESC, a.id DESC
+             ) t ORDER BY t.accessed_at DESC, t.id DESC',
+            { Slice => {} }
+        );
+        for my $r (@$rows) {
+            $r->{id}           = 0 + $r->{id};
+            $r->{user_id}      = defined $r->{user_id} ? 0 + $r->{user_id} : undef;
+            # whois で調べた Organization（キャッシュ優先。初見の範囲だけ whois を叩く）。
+            $r->{organization} = whois_org_for_ip($r->{ip_addr});
+        }
+        respond({ entries => $rows });
     }
     elsif ($action eq 'images' && $method eq 'GET') {
         # ギャラリー一覧。未ログインでも見られる（遊べる）。ログイン中なら mine を立てる。
@@ -1157,21 +1289,21 @@ eval {
 
         # 実ファイルを書く。ディレクトリが無ければ作る。
         eval {
-            mkdir $IMAGE_DIR unless -d $IMAGE_DIR;
-            mkdir "$IMAGE_DIR/full"  unless -d "$IMAGE_DIR/full";
-            mkdir "$IMAGE_DIR/thumb" unless -d "$IMAGE_DIR/thumb";
+            mkdir $APPDATA_DIR unless -d $APPDATA_DIR;
+            mkdir "$APPDATA_DIR/full"  unless -d "$APPDATA_DIR/full";
+            mkdir "$APPDATA_DIR/thumb" unless -d "$APPDATA_DIR/thumb";
             1;
         } or fail('image_write_failed', '500 Internal Server Error');
 
         my $basename = random_hex(16);
         eval {
-            write_file("$IMAGE_DIR/full/$basename.$ext", $full_bytes);
+            write_file("$APPDATA_DIR/full/$basename.$ext", $full_bytes);
             # サムネは常に JPEG（クライアントが image/jpeg で生成して送る）。full の
             # 拡張子（png/webp/gif）に関わらず thumb は .jpg に統一する。
-            write_file("$IMAGE_DIR/thumb/$basename.jpg", $thumb_bytes);
+            write_file("$APPDATA_DIR/thumb/$basename.jpg", $thumb_bytes);
             1;
         } or do {
-            unlink "$IMAGE_DIR/full/$basename.$ext", "$IMAGE_DIR/thumb/$basename.jpg";
+            unlink "$APPDATA_DIR/full/$basename.$ext", "$APPDATA_DIR/thumb/$basename.jpg";
             fail('image_write_failed', '500 Internal Server Error');
         };
 
@@ -1228,7 +1360,7 @@ eval {
             unless (defined $row->{owner_id} && $row->{owner_id} == $u->{id}) || pgbool($u->{is_admin}) == JSON::PP::true;
         $dbh->do('DELETE FROM images WHERE id = ?', undef, $id);   # puzzles→progress、image_tags も CASCADE で消える
         purge_unused_tags($dbh);   # その画像にしか付いていなかったタグを残さない
-        unlink "$IMAGE_DIR/full/$row->{basename}.$row->{ext}", "$IMAGE_DIR/thumb/$row->{basename}.jpg";
+        unlink "$APPDATA_DIR/full/$row->{basename}.$row->{ext}", "$APPDATA_DIR/thumb/$row->{basename}.jpg";
         respond({ ok => JSON::PP::true });
     }
     elsif ($action eq 'image_quarantine' && $method eq 'POST') {
@@ -1257,8 +1389,8 @@ eval {
         my $stamp = sprintf('%04d%02d%02d-%02d%02d%02d',
                             $now[5] + 1900, $now[4] + 1, $now[3], $now[2], $now[1], $now[0]);
         my $dir = "$ZIGSAW_QUARANTINE_DIR/$stamp-image$id";
-        my $full  = "$IMAGE_DIR/full/$image->{basename}.$image->{ext}";
-        my $thumb = "$IMAGE_DIR/thumb/$image->{basename}.jpg";
+        my $full  = "$APPDATA_DIR/full/$image->{basename}.$image->{ext}";
+        my $thumb = "$APPDATA_DIR/thumb/$image->{basename}.jpg";
         my $moved = eval {
             mkdir $ZIGSAW_QUARANTINE_DIR unless -d $ZIGSAW_QUARANTINE_DIR;
             mkdir $dir or die "mkdir $dir: $!";

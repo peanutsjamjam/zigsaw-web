@@ -18,13 +18,13 @@ api.cgi (Perl CGI, suexec で sugawara 実行)
    ▼
 PostgreSQL  DB: zigsaw  (users / sessions / signup_tokens / reset_tokens / images / puzzles / progress)
    +
-images/full, images/thumb (画像の実ファイル。Apache が静的配信)
+appdata/full, appdata/thumb (画像の実ファイル。Apache が静的配信)
 ```
 
 - **フロント**: Vite + React + TypeScript。`dist/` に本番ビルド。
 - **バックエンド**: `api.cgi`（`#!/usr/bin/perl`、DBI/DBD::Pg/JSON::PP/Digest::SHA）。nenpyo と同じ作り。
 - **配信**: Apache UserDir（`~/public_html/zigsaw/` → `/~sugawara/zigsaw/`）。`.htaccess` で
-  ルートと未知パスを `dist/` へ rewrite、実在ファイル（`api.cgi`・`images/`）はそのまま実行/配信。
+  ルートと未知パスを `dist/` へ rewrite、実在ファイル（`api.cgi`・`appdata/`）はそのまま実行/配信。
 - **認証**: パスワードは PBKDF2-HMAC-SHA256（12万回）でハッシュ化して `users` に保存。
   ログイン時にランダムトークンを `sessions` に保存し、`zigsaw_sid` Cookie（HttpOnly/Secure/SameSite=Lax）で受け渡す。
   - **ログインはメールアドレス＋パスワード**（`users.email` を `lower()` で一意）。`username` は表示名（画像の投稿者名）。
@@ -35,7 +35,7 @@ images/full, images/thumb (画像の実ファイル。Apache が静的配信)
 
 ### 画像（共有ギャラリー）
 
-- 実ファイルは `images/full/<uuid>.<ext>`（遊ぶ用）と `images/thumb/<uuid>.<ext>`（一覧・完成図プレビュー用）。
+- 実ファイルは `appdata/full/<uuid>.<ext>`（遊ぶ用）と `appdata/thumb/<uuid>.<ext>`（一覧・完成図プレビュー用）。
   DB の `images` テーブルが1枚につき1行を持つ（`owner_id` が NULL なら管理者設置、値ありならユーザー投稿）。
 - **縮小もサムネ生成もクライアント側で行う**（サーバーに ImageMagick/GD が無いため）。
   アップロードは縮小版（長辺1800）とサムネ（長辺600）を base64 で送り、サーバーはバイトを書くだけ。
@@ -112,11 +112,11 @@ images/full, images/thumb (画像の実ファイル。Apache が静的配信)
 ## 管理者による画像の追加
 
 画像をギャラリーに置くには、共有画像ディレクトリの `incoming/` に画像ファイル（jpg/png/webp/gif）を
-置いてシードスクリプトを実行する（`owner_id=NULL`＝管理者設置として登録される）。`images/incoming/` は
-`/var/jp.peanutsjamjam.zigsaw.images/incoming/` へのシンボリックリンク越しに同じ場所を指す。
+置いてシードスクリプトを実行する（`owner_id=NULL`＝管理者設置として登録される）。`appdata/incoming/` は
+`/var/jp.peanutsjamjam.zigsaw.appdata/incoming/` へのシンボリックリンク越しに同じ場所を指す。
 
 ```
-cp <画像...> /var/jp.peanutsjamjam.zigsaw.images/incoming/
+cp <画像...> /var/jp.peanutsjamjam.zigsaw.appdata/incoming/
 /usr/bin/perl ~/public_html/zigsaw/ddl/seed_images.pl
 ```
 
@@ -154,16 +154,17 @@ dev（`~/public_html/zigsaw` → `/~sugawara/zigsaw/`）とは別系統の本番
   （`GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES` ＋ `USAGE,SELECT ON ALL SEQUENCES` ＋
   同内容の `ALTER DEFAULT PRIVILEGES`。今後テーブルを追加したら同じ付与が必要）。
   - dev 側の CGI は UserDir + suexec で **`sugawara`** として動き、role=`sugawara`（テーブル所有者）で接続する。
-- **画像の実ファイル**: 正本は **`/var/jp.peanutsjamjam.zigsaw.images`**（`full/` `thumb/` `incoming/`）。
-  dev の `~/public_html/zigsaw/images` と本番の `html/images` は、どちらもここへの**シンボリックリンク**。
+- **画像の実ファイル**: 正本は **`/var/jp.peanutsjamjam.zigsaw.appdata`**（`full/` `thumb/` `incoming/`。
+  ほかに whois キャッシュの `whois/` もここに置く）。
+  dev の `~/public_html/zigsaw/appdata` と本番の `html/appdata` は、どちらもここへの**シンボリックリンク**。
   リンク・実体とも sugawara 所有なので、dev/本番の vhost の `Options SymLinksIfOwnerMatch` で追従できる。
   dev は sugawara、本番は apache が書き込むため、この正本ディレクトリに **POSIX ACL** を設定して両ユーザーに
   rwx を許可し、新規ファイルにも継承させてある:
   ```
-  setfacl -R    -m u:apache:rwx -m u:sugawara:rwx /var/jp.peanutsjamjam.zigsaw.images
-  setfacl -R -d -m u:apache:rwx -m u:sugawara:rwx /var/jp.peanutsjamjam.zigsaw.images
+  setfacl -R    -m u:apache:rwx -m u:sugawara:rwx /var/jp.peanutsjamjam.zigsaw.appdata
+  setfacl -R -d -m u:apache:rwx -m u:sugawara:rwx /var/jp.peanutsjamjam.zigsaw.appdata
   ```
-  CGI の `IMAGE_DIR` は `dirname(api.cgi)/images` で、このシンボリックリンク越しに正本へ解決される
+  CGI の `APPDATA_DIR` は `dirname(api.cgi)/appdata` で、このシンボリックリンク越しに正本へ解決される
   （dev・本番でコードは同じ）。
 - **デプロイ**（フロント／`api.cgi` を更新したとき）:
   ```

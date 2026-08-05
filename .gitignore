@@ -14,11 +14,11 @@ dist-ssr
 # 環境ごとの設定（dev/本番で内容が異なる。env.pl.example をコピーして作る）
 env.pl
 
-# アップロード/管理者設置の画像の実ファイル（DB の images テーブルと対で増える）
+# アプリデータ（アップロード/管理者設置の画像の実ファイル・whois キャッシュ）への
+# シンボリックリンク。実体は /var/jp.peanutsjamjam.zigsaw.appdata（git 管理外）。
+/appdata
+# 旧リンク名（appdata への移行が済んだら消してよい）
 /images
-images/full/
-images/thumb/
-images/incoming/
 
 # Editor directories and files
 .vscode/*

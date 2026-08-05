@@ -1,10 +1,10 @@
--- images: みんなで遊べる共有ギャラリーの1枚。実ファイルは images/full と
---   images/thumb に置き（api.cgi と同じディレクトリ配下）、DB は1枚につき1行を持つ。
+-- images: みんなで遊べる共有ギャラリーの1枚。実ファイルは appdata/full と
+--   appdata/thumb に置き（api.cgi と同じディレクトリ配下）、DB は1枚につき1行を持つ。
 --   owner_id が NULL のものは管理者がシードスクリプトで置いた画像。値があれば
 --   その利用者がアップロードした画像（本人・管理者だけが削除できる）。
 --   基準名 (basename) は拡張子抜きの UUID。実ファイルは
---     images/full/<basename>.<ext>   （縮小済みの、遊ぶ用の画像）
---     images/thumb/<basename>.jpg    （一覧・完成図プレビュー用のサムネイル）
+--     appdata/full/<basename>.<ext>   （縮小済みの、遊ぶ用の画像）
+--     appdata/thumb/<basename>.jpg    （一覧・完成図プレビュー用のサムネイル）
 --   縮小もサムネ生成もクライアント側で行う（サーバーに画像処理系が無いため）。
 --   画像に付けるタグは tags / image_tags（多対多）で持つ。tags.sql 参照。
 CREATE TABLE images (

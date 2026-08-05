@@ -69,6 +69,17 @@ export type DevUserDetail = {
   progress: ProgressItem[]
 }
 
+// 開発用: access_log のダイジェスト1行ぶん（dev_access_log が返す。開発環境のみ）。
+// IP アドレスごとに最新の1行だけが返る。
+export type DevAccessLogEntry = {
+  id: number                   // access_log の行 id
+  ip_addr: string | null       // 送信元 IP。記録されていなければ null
+  user_id: number | null       // その時ログインしていたユーザー。未ログインなら null
+  username: string | null      // 同上（アカウント削除後は user_id ごと null）
+  accessed_at: string          // アクセス日時
+  organization: string | null  // whois で調べた Organization。分からなければ null
+}
+
 // 開発用: 画像ディレクトリの使用状況（dev_storage が返す）。
 export type DevStorage = {
   image_count: number   // full/ 内のファイル数（＝画像数）
@@ -186,6 +197,7 @@ export const api = {
   devStorage: () => request<DevStorage>('?action=dev_storage'),
   devUsers: () => request<{ users: DevUser[] }>('?action=dev_users').then((r) => r.users),
   devUserDetail: (id: number) => request<DevUserDetail>(`?action=dev_user_detail&id=${id}`),
+  devAccessLog: () => request<{ entries: DevAccessLogEntry[] }>('?action=dev_access_log').then((r) => r.entries),
   login: (email: string, password: string) => postJson<Account>('?action=login', { email, password }),
   logout: () => postJson<{ ok: true }>('?action=logout', {}),
 

@@ -10,8 +10,8 @@ AddHandler cgi-script .cgi
 LimitRequestBody 12582912
 
 # 画像は宣言どおりの Content-Type で扱わせ、内容からの MIME 推測（sniffing）を無効化する。
-# 万一おかしなファイルが images/ に混じっても HTML/JS として実行させないための多層防御。
-<If "%{REQUEST_URI} =~ m#/images/#">
+# 万一おかしなファイルが appdata/ に混じっても HTML/JS として実行させないための多層防御。
+<If "%{REQUEST_URI} =~ m#/appdata/#">
     Header always set X-Content-Type-Options "nosniff"
 </If>
 
@@ -21,7 +21,7 @@ RewriteRule ^dist/ - [L]
 # ルート ("/~sugawara/zigsaw/") は dist/index.html を返す
 RewriteRule ^$ dist/index.html [L]
 
-# 実在するファイル/ディレクトリ（api.cgi, images/ など）はそのまま配信/実行
+# 実在するファイル/ディレクトリ（api.cgi, appdata/ など）はそのまま配信/実行
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]

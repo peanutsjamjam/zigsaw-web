@@ -31,7 +31,7 @@ $res = api_put(action => 'progress', sid => $alice,
 is $res->{status}, 200, '準備: 進捗も保存';
 
 # ---- dev_* は「開発環境かつ管理者」以外には 404 -----------------------------------
-for my $a (qw(dev_storage dev_users dev_user_detail)) {
+for my $a (qw(dev_storage dev_users dev_user_detail dev_access_log)) {
     $res = api_get(action => $a);
     is $res->{status}, 404, "$a: 未ログインは 404（存在を隠す）";
     is $res->{json}{error}, 'not_found', "$a: error=not_found（401/403 ではない）";
@@ -69,6 +69,46 @@ is scalar @{ $res->{json}{puzzles} }, 1, 'dev_user_detail: パズル一覧';
 is scalar @{ $res->{json}{progress} }, 1, 'dev_user_detail: 進捗一覧';
 is $res->{json}{progress}[0]{puzzle}{id}, $puz_id, 'dev_user_detail: 進捗にパズル情報が付く';
 
+# ---- dev_access_log ---------------------------------------------------------------
+# ここまでのリクエストはすべて 127.0.0.1 からなので、ダイジェストは1行に畳まれる。
+$res = api_get(action => 'dev_access_log', sid => $adm);
+is $res->{status}, 200, 'dev_access_log: 管理者は 200';
+is scalar @{ $res->{json}{entries} }, 1, 'dev_access_log: IP ごとに1行に畳まれる';
+my $entry = $res->{json}{entries}[0];
+is $entry->{ip_addr}, '127.0.0.1', 'dev_access_log: ip_addr';
+is $entry->{username}, 'boss', 'dev_access_log: 最新行のユーザー（この呼び出し自身）';
+is $entry->{user_id}, $adm_id, 'dev_access_log: 最新行の user_id';
+ok $entry->{accessed_at}, 'dev_access_log: accessed_at が付く';
+ok db_scalar('SELECT count(*) FROM access_log') > 1,
+    'dev_access_log: 生ログには複数行ある（ダイジェストであることの裏取り）';
+
+# ---- dev_access_log: whois の Organization とキャッシュ -----------------------------
+# 偽 whois（t/lib/ZigsawTest.pm が用意）は「その IPv4 の /24 が NetRange」という応答を返す。
+is $entry->{organization}, 'Test Org 127.0.0 (TEST)', 'whois: Organization が表に付く';
+is scalar(whois_log()), 1, 'whois: 初見の IP で1回だけ呼ばれる';
+ok -f appdata_dir() . '/whois/127.0.0.0-127.0.0.255.json',
+    'whois: NetRange 名のキャッシュファイルが作られる';
+
+# 2回目はキャッシュに当たるので whois コマンドは呼ばれない。
+$res = api_get(action => 'dev_access_log', sid => $adm);
+is $res->{json}{entries}[0]{organization}, 'Test Org 127.0.0 (TEST)', 'whois: キャッシュからも同じ値';
+is scalar(whois_log()), 1, 'whois: 2回目は叩かれない（キャッシュヒット）';
+
+# 初見の NetRange の IP は whois される。同じ NetRange 内の別 IP はキャッシュで済む。
+api_get(action => 'me', sid => $alice, ip => '203.0.113.5');
+$res = api_get(action => 'dev_access_log', sid => $adm);
+is scalar @{ $res->{json}{entries} }, 2, 'whois: 別 IP からのアクセスで2行になる';
+my ($e2) = grep { $_->{ip_addr} eq '203.0.113.5' } @{ $res->{json}{entries} };
+is $e2->{organization}, 'Test Org 203.0.113 (TEST)', 'whois: 初見の NetRange の Organization';
+is scalar(whois_log()), 2, 'whois: 初見の NetRange の分だけ叩かれる';
+
+api_get(action => 'me', sid => $alice, ip => '203.0.113.77');
+$res = api_get(action => 'dev_access_log', sid => $adm);
+is scalar @{ $res->{json}{entries} }, 3, 'whois: 同じ NetRange 内の別 IP も行としては増える';
+my ($e3) = grep { $_->{ip_addr} eq '203.0.113.77' } @{ $res->{json}{entries} };
+is $e3->{organization}, 'Test Org 203.0.113 (TEST)', 'whois: 同じ NetRange はキャッシュから引ける';
+is scalar(whois_log()), 2, 'whois: 同じ NetRange では whois を叩き直さない';
+
 # ---- 緊急退避（image_quarantine） ---------------------------------------------------
 $res = api_post(action => 'image_quarantine', query => { id => $img_id });
 is $res->{status}, 401, '退避: 未ログインは 401';
@@ -88,7 +128,7 @@ ok -d $qdir, '退避: ディレクトリが作られる';
 ok -f "$qdir/meta.json", '退避: meta.json が書かれる';
 ok -f "$qdir/full-$basename.png", '退避: full の実ファイルが移される';
 ok -f "$qdir/thumb-$basename.jpg", '退避: thumb の実ファイルが移される';
-ok !-f image_dir() . "/full/$basename.png", '退避: 配信ディレクトリからは消える';
+ok !-f appdata_dir() . "/full/$basename.png", '退避: 配信ディレクトリからは消える';
 
 my $meta = do { open my $fh, '<:raw', "$qdir/meta.json" or die $!; local $/; <$fh> };
 require JSON::PP;

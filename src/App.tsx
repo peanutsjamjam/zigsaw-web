@@ -5,6 +5,7 @@ import { PuzzleGameState } from './lib/game'
 import { loadSettings, saveSettings, type AppSettings } from './lib/settings'
 import { primeSound } from './lib/sound'
 import { AuthView } from './components/AuthView'
+import { DevAccessLogView } from './components/DevAccessLogView'
 import { DevView } from './components/DevView'
 import { GameView } from './components/GameView'
 import { ResetPasswordView } from './components/ResetPasswordView'
@@ -29,6 +30,8 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false)
   // 開発用フラスコ画面を出しているか（開発環境のみ）。
   const [showDevView, setShowDevView] = useState(false)
+  // 開発用アクセスログ画面（2つ目のフラスコ）を出しているか（開発環境のみ）。
+  const [showDevLogView, setShowDevLogView] = useState(false)
   const [session, setSession] = useState<Session | null>(null)
   const [busy, setBusy] = useState(false)
   const [signupToken, setSignupToken] = useState<string | null>(
@@ -130,6 +133,9 @@ export default function App() {
   if (isDev && showDevView) {
     return <DevView onBack={() => setShowDevView(false)} />
   }
+  if (isDev && showDevLogView) {
+    return <DevAccessLogView onBack={() => setShowDevLogView(false)} />
+  }
 
   if (session) {
     return (
@@ -156,6 +162,7 @@ export default function App() {
         isDev={isDev}
         onStart={(req) => void start(req)}
         onOpenDev={() => setShowDevView(true)}
+        onOpenDevLog={() => setShowDevLogView(true)}
         onRequestLogin={() => setShowAuth(true)}
         onLoggedOut={() => setAccount(null)}
         busy={busy}

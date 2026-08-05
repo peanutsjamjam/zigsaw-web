@@ -4,7 +4,7 @@
 #   - t/tmp/sandbox に api.cgi をコピーし、テスト用 env.pl で
 #     DB=zigsaw_test / 偽 sendmail / サンドボックス内 quarantine に差し替える。
 #   - zigsaw_test はテストファイルごとに ddl/*.sql から作り直す。
-#   - 画像は sandbox/images に書かれる（api.cgi は自分の場所を基準に解決するため）。
+#   - 画像や whois キャッシュは sandbox/appdata に書かれる（api.cgi は自分の場所を基準に解決するため）。
 #   - CGI は Apache を介さず、環境変数を組み立てて /usr/bin/perl の子プロセスで実行する。
 #
 # 実行方法（リポジトリのどこからでも）:
@@ -31,7 +31,8 @@ our @EXPORT = qw(
     db_do db_scalar q_lit
     make_user signup_via_api
     mails clear_mails
-    sandbox_dir image_dir quarantine_dir
+    sandbox_dir appdata_dir quarantine_dir
+    whois_log clear_whois_log
     TINY_PNG_B64
 );
 
@@ -50,9 +51,10 @@ use constant TINY_PNG_B64 =>
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 sub sandbox_dir    { $SANDBOX }
-sub image_dir      { "$SANDBOX/images" }
+sub appdata_dir    { "$SANDBOX/appdata" }
 sub quarantine_dir { "$SANDBOX/quarantine" }
 sub mail_log       { "$SANDBOX/mail.log" }
+sub whois_log_file { "$SANDBOX/whois.log" }
 
 # use ZigsawTest; だけでサンドボックスと DB を作り直す。
 sub import {
@@ -84,13 +86,14 @@ sub init {
         unless $src =~ /our \$ZIGSAW_DB/ && $src =~ /dbname=\$ZIGSAW_DB/;
     write_file("$SANDBOX/api.cgi", $src);
 
-    # テスト用 env.pl（DB・sendmail・退避先をサンドボックスに向ける）。
+    # テスト用 env.pl（DB・sendmail・退避先・whois をサンドボックスに向ける）。
     write_file("$SANDBOX/env.pl", <<EOF);
 \$main::ZIGSAW_ENV            = 'development';
 \$main::ZIGSAW_BASE_URL       = 'https://test.invalid/zigsaw/';
 \$main::ZIGSAW_DB             = '$TEST_DB';
 \$main::ZIGSAW_SENDMAIL       = '$SANDBOX/sendmail';
 \$main::ZIGSAW_QUARANTINE_DIR = '$SANDBOX/quarantine';
+\$main::ZIGSAW_WHOIS          = '$SANDBOX/whois';
 1;
 EOF
 
@@ -104,6 +107,20 @@ print \$fh "\\n=== END ===\\n";
 close \$fh;
 EOF
     chmod 0755, "$SANDBOX/sendmail" or die "chmod sendmail: $!";
+
+    # 偽 whois: 呼び出しを whois.log に追記し、IPv4 なら「その /24 が NetRange」という
+    # 体の決まった応答を返す（ネットワークには出ない）。
+    write_file("$SANDBOX/whois", <<EOF);
+#!$CGI_PERL
+my \$ip = \$ARGV[0] // '';
+open my \$fh, '>>', '$SANDBOX/whois.log' or die \$!;
+print \$fh "\$ip\\n";
+close \$fh;
+my (\$a, \$b, \$c) = \$ip =~ /^(\\d+)\\.(\\d+)\\.(\\d+)\\./ or exit 0;
+print "NetRange:       \$a.\$b.\$c.0 - \$a.\$b.\$c.255\\n";
+print "Organization:   Test Org \$a.\$b.\$c (TEST)\\n";
+EOF
+    chmod 0755, "$SANDBOX/whois" or die "chmod whois: $!";
 
     # テスト DB を ddl/*.sql から作り直す（依存順に流す）。
     run_or_die('dropdb', '--if-exists', $TEST_DB);
@@ -224,6 +241,19 @@ sub mails {
 }
 
 sub clear_mails { unlink mail_log(); }
+
+# ---- 偽 whois が記録した呼び出し（1行=1回、引数の IP） -------------------------
+sub whois_log {
+    my @lines;
+    if (-f whois_log_file()) {
+        open my $fh, '<:raw', whois_log_file() or die $!;
+        chomp(@lines = <$fh>);
+        close $fh;
+    }
+    return @lines;   # スカラーコンテキストでは呼び出し回数（空でも 0）
+}
+
+sub clear_whois_log { unlink whois_log_file(); }
 
 # ---- CGI 実行 -----------------------------------------------------------------
 sub url_encode {

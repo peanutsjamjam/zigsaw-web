@@ -2,10 +2,10 @@
 # 管理者が置いた画像を、みんなで遊べるギャラリー（images テーブル）に登録する。
 #
 # 使い方:
-#   1. 画像ファイルを  ~/public_html/zigsaw/images/incoming/  に置く（jpg/jpeg/png/webp/gif）。
+#   1. 画像ファイルを  ~/public_html/zigsaw/appdata/incoming/  に置く（jpg/jpeg/png/webp/gif）。
 #   2. このスクリプトを実行する:
 #        /usr/bin/perl ddl/seed_images.pl
-#   すると incoming/ の各画像を images/full と images/thumb にコピーし、DB に owner_id=NULL
+#   すると incoming/ の各画像を appdata/full と appdata/thumb にコピーし、DB に owner_id=NULL
 #   （＝管理者設置）で登録して、incoming/ からは取り除く。
 #
 # ※ サムネイル（thumb）は GraphicsMagick（gm）で長辺 600px 以内に縮小して生成する。
@@ -22,8 +22,8 @@ use Cwd qw(abs_path);
 # スクリプトのあるディレクトリ（ddl/）の親（zigsaw/）を基準にする。
 my $SCRIPT_DIR = dirname(abs_path(__FILE__));
 my $ROOT       = dirname($SCRIPT_DIR);
-my $IMAGE_DIR  = "$ROOT/images";
-my $INCOMING   = "$IMAGE_DIR/incoming";
+my $APPDATA_DIR  = "$ROOT/appdata";
+my $INCOMING   = "$APPDATA_DIR/incoming";
 
 my %EXT_OK = map { $_ => 1 } qw(jpg jpeg png webp gif);
 
@@ -95,9 +95,9 @@ sub copy_file {
 }
 
 # ---- 本体 ------------------------------------------------------------------
-mkdir $IMAGE_DIR unless -d $IMAGE_DIR;
-mkdir "$IMAGE_DIR/full"  unless -d "$IMAGE_DIR/full";
-mkdir "$IMAGE_DIR/thumb" unless -d "$IMAGE_DIR/thumb";
+mkdir $APPDATA_DIR unless -d $APPDATA_DIR;
+mkdir "$APPDATA_DIR/full"  unless -d "$APPDATA_DIR/full";
+mkdir "$APPDATA_DIR/thumb" unless -d "$APPDATA_DIR/thumb";
 mkdir $INCOMING unless -d $INCOMING;
 
 opendir my $dh, $INCOMING or die "opendir $INCOMING: $!";
@@ -128,9 +128,9 @@ for my $name (@files) {
     }
     my $basename = random_hex(16);
     eval {
-        copy_file($src, "$IMAGE_DIR/full/$basename.$ext");
+        copy_file($src, "$APPDATA_DIR/full/$basename.$ext");
         # サムネは常に JPEG（full の拡張子に関わらず thumb は .jpg に統一）。
-        make_thumb($src, "$IMAGE_DIR/thumb/$basename.jpg")
+        make_thumb($src, "$APPDATA_DIR/thumb/$basename.jpg")
             or die "gm によるサムネ生成に失敗（gm は入っていますか）";
         # display_name と original_name にはファイル名（拡張子抜き）を入れる。upload_ip は NULL。
         $dbh->do(
@@ -142,7 +142,7 @@ for my $name (@files) {
         1;
     } or do {
         warn "登録失敗: $name: $@\n";
-        unlink "$IMAGE_DIR/full/$basename.$ext", "$IMAGE_DIR/thumb/$basename.jpg";
+        unlink "$APPDATA_DIR/full/$basename.$ext", "$APPDATA_DIR/thumb/$basename.jpg";
         next;
     };
     print "登録: $name  (${w}x${h})\n";
