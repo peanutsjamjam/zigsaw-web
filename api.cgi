@@ -358,17 +358,38 @@ sub whois_fetch {
     return $out;
 }
 
+# IPv4 の CIDR（例 133.203.0.0/16）を「開始・終了アドレス」の組にする。不正なら空リスト。
+sub ipv4_cidr_range {
+    my ($base, $bits) = @_;
+    return () unless defined $bits && $bits =~ /^\d+$/ && $bits <= 32;
+    my $packed = ip_pack($base);
+    return () unless defined $packed && length($packed) == 4;
+    my $n    = unpack('N', $packed);
+    my $mask = $bits == 0 ? 0 : (0xFFFFFFFF << (32 - $bits)) & 0xFFFFFFFF;
+    my $lo   = $n & $mask;
+    my $hi   = $lo | (~$mask & 0xFFFFFFFF);
+    return (join('.', unpack('C4', pack('N', $lo))),
+            join('.', unpack('C4', pack('N', $hi))));
+}
+
 # whois 出力からアドレス範囲と Organization を抜き出す。
 #   範囲: NetRange（ARIN）/ inetnum・inet6num（APNIC・RIPE）の「開始 - 終了」形式。
-#   組織: Organization（ARIN）を第一候補に、OrgName / org-name / descr の順で拾う。
+#         JPNIC（日本語出力）は「a. [IPネットワークアドレス] 133.203.0.0/16」の CIDR 表記
+#         なので、範囲に直して扱う（英語出力 /e では [Network Number]）。
+#   組織: Organization（ARIN）を第一候補に、[Organization]・[組織名]（JPNIC）、
+#         OrgName / org-name / descr の順で拾う。
 sub whois_parse {
     my ($out) = @_;
     my ($start, $end);
     if ($out =~ /^\s*(?:NetRange|inet6?num):\s*([0-9A-Fa-f.:]+)\s*-\s*([0-9A-Fa-f.:]+)\s*$/mi) {
         ($start, $end) = ($1, $2);
     }
+    elsif ($out =~ /\[(?:IPネットワークアドレス|Network Number)\]\s*([0-9.]+)\/(\d+)/) {
+        ($start, $end) = ipv4_cidr_range($1, $2);
+    }
     my $org;
-    for my $re (qr/^\s*Organization:\s*(.+?)\s*$/mi, qr/^\s*OrgName:\s*(.+?)\s*$/mi,
+    for my $re (qr/^\s*Organization:\s*(.+?)\s*$/mi, qr/\[Organization\][ \t]*(.+?)\s*$/m,
+                qr/\[組織名\][ \t]*(.+?)\s*$/m,      qr/^\s*OrgName:\s*(.+?)\s*$/mi,
                 qr/^\s*org-name:\s*(.+?)\s*$/mi,     qr/^\s*descr:\s*(.+?)\s*$/mi) {
         if ($out =~ $re) { $org = $1; last }
     }

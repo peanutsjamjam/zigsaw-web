@@ -109,17 +109,28 @@ EOF
     chmod 0755, "$SANDBOX/sendmail" or die "chmod sendmail: $!";
 
     # 偽 whois: 呼び出しを whois.log に追記し、IPv4 なら「その /24 が NetRange」という
-    # 体の決まった応答を返す（ネットワークには出ない）。
-    write_file("$SANDBOX/whois", <<EOF);
+    # 体の決まった応答を返す（ネットワークには出ない）。133.* だけは JPNIC の日本語出力を
+    # 模した形式（CIDR 表記・[組織名]/[Organization] ラベル）で返し、パーサの対応を試せるようにする。
+    my $fake_whois = <<EOF;
 #!$CGI_PERL
 my \$ip = \$ARGV[0] // '';
 open my \$fh, '>>', '$SANDBOX/whois.log' or die \$!;
 print \$fh "\$ip\\n";
 close \$fh;
 my (\$a, \$b, \$c) = \$ip =~ /^(\\d+)\\.(\\d+)\\.(\\d+)\\./ or exit 0;
+if (\$a == 133) {
+    print "Network Information: [ネットワーク情報]\\n";
+    print "a. [IPネットワークアドレス]     \$a.\$b.0.0/16\\n";
+    print "b. [ネットワーク名]             TESTNET\\n";
+    print "f. [組織名]                     テスト組織\\n";
+    print "g. [Organization]               Test Org JP\\n";
+    exit 0;
+}
 print "NetRange:       \$a.\$b.\$c.0 - \$a.\$b.\$c.255\\n";
 print "Organization:   Test Org \$a.\$b.\$c (TEST)\\n";
 EOF
+    utf8::encode($fake_whois);   # 日本語を含むので UTF-8 バイト列にして書く
+    write_file("$SANDBOX/whois", $fake_whois);
     chmod 0755, "$SANDBOX/whois" or die "chmod whois: $!";
 
     # テスト DB を ddl/*.sql から作り直す（依存順に流す）。

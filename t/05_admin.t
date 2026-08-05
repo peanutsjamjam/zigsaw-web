@@ -109,6 +109,22 @@ my ($e3) = grep { $_->{ip_addr} eq '203.0.113.77' } @{ $res->{json}{entries} };
 is $e3->{organization}, 'Test Org 203.0.113 (TEST)', 'whois: 同じ NetRange はキャッシュから引ける';
 is scalar(whois_log()), 2, 'whois: 同じ NetRange では whois を叩き直さない';
 
+# JPNIC の日本語出力（範囲は CIDR 表記、組織は [Organization]/[組織名] ラベル）も読める。
+# 偽 whois は 133.* に JPNIC 形式で応答する。
+api_get(action => 'me', sid => $alice, ip => '133.203.134.50');
+$res = api_get(action => 'dev_access_log', sid => $adm);
+my ($jp) = grep { $_->{ip_addr} eq '133.203.134.50' } @{ $res->{json}{entries} };
+is $jp->{organization}, 'Test Org JP', 'whois: JPNIC 形式から Organization を読める';
+is scalar(whois_log()), 3, 'whois: JPNIC 形式も1回だけ叩かれる';
+ok -f appdata_dir() . '/whois/133.203.0.0-133.203.255.255.json',
+    'whois: CIDR（/16）を範囲に直してキャッシュする';
+
+api_get(action => 'me', sid => $alice, ip => '133.203.200.1');
+$res = api_get(action => 'dev_access_log', sid => $adm);
+my ($jp2) = grep { $_->{ip_addr} eq '133.203.200.1' } @{ $res->{json}{entries} };
+is $jp2->{organization}, 'Test Org JP', 'whois: /16 内の別 IP はキャッシュから引ける';
+is scalar(whois_log()), 3, 'whois: /16 内の別 IP では叩き直さない';
+
 # ---- 緊急退避（image_quarantine） ---------------------------------------------------
 $res = api_post(action => 'image_quarantine', query => { id => $img_id });
 is $res->{status}, 401, '退避: 未ログインは 401';
