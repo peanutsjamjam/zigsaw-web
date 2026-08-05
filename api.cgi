@@ -14,7 +14,7 @@ use Socket qw(inet_pton AF_INET AF_INET6);
 # 配信:  Apache UserDir 配下、suexec で sugawara として実行される。
 #        そのため PostgreSQL へは peer 認証（パスワード不要）で接続できる。
 # DB:    zigsaw（users / sessions / signup_tokens / reset_tokens / access_log / rate_events / images /
-#        tags / image_tags / puzzles / progress / puzzle_clears）。
+#        tags / image_tags / puzzles / progress / puzzle_clears / puzzle_comments）。
 #        画像のタグは tags / image_tags（多対多）。定義は ddl/*.sql 参照。
 # 認証:  ログイン時にランダムトークンを sessions に保存し、HttpOnly Cookie
 #        (zigsaw_sid) で受け渡す。パスワードは PBKDF2-HMAC-SHA256 で保存。
@@ -74,6 +74,10 @@ use Socket qw(inet_pton AF_INET AF_INET6);
 #   GET    ?action=progress_snapshot&id=<id>        -> その途中経過の「現在の様子」snapshot だけを返す（要ログイン）
 #   PUT    ?action=progress {puzzle_id,state}       -> 途中経過を保存（upsert。要ログイン）
 #   DELETE ?action=progress&id=<id>                 -> 途中経過を削除（要ログイン）
+#   GET    ?action=puzzle_comments&puzzle_id=<id>   -> クリアコメント一覧（誰でも）。ログイン中は
+#                                                      自分のコメント（mine）とクリア済みか（cleared）も返す
+#   PUT    ?action=puzzle_comment {puzzle_id,body}  -> クリアコメントの登録/変更（クリアした人のみ。
+#                                                      1ユーザー1パズル1件で upsert。200文字まで）
 
 my $COOKIE_NAME  = 'zigsaw_sid';
 # Cookie の Path は配信パスに合わせて自動判定する（環境ごとに固定値を持たない）。
@@ -95,6 +99,8 @@ my $MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 my $MAX_BODY_BYTES = 12 * 1024 * 1024;
 # progress の state（プレイ中の盤面スナップショット）の最大バイト数（JSON エンコード後）。
 my $MAX_STATE_BYTES = 1024 * 1024;
+# クリアコメント1件の最大長（コードポイント数。ddl/puzzle_comments.sql の CHECK と揃える）。
+my $MAX_COMMENT_LENGTH = 200;
 
 # ---- レート制限のしきい値（rate_events テーブルで直近件数を数える） --------
 # login: 直近 $LOGIN_WINDOW_MIN 分の失敗が、同一メール/同一IPでこの回数以上なら一時的に拒否。
@@ -1619,6 +1625,79 @@ eval {
         my $u = require_user($dbh);
         my $id = int(query_param('id') || 0);
         $dbh->do('DELETE FROM progress WHERE id = ? AND user_id = ?', undef, $id, $u->{id});
+        respond({ ok => JSON::PP::true });
+    }
+    elsif ($action eq 'puzzle_comments' && $method eq 'GET') {
+        # パズルのクリアコメント一覧。誰でも見られる。自分のコメントも時系列順で一覧に
+        # 含め、mine フラグで区別する（フロントはその行に「変更」ボタンを出す）。
+        # 別枠の mine は入力欄の初期値や「登録/変更」の出し分けに使う。cleared は
+        # 自分がそのパズルをクリア済みか（＝コメントを書けるか）。
+        my $u = current_user($dbh);
+        my $uid = $u ? $u->{id} : -1;
+        my $puzzle_id = int(query_param('puzzle_id') || 0);
+        fail('not_found', '404 Not Found')
+            unless $puzzle_id >= 1
+                && $dbh->selectrow_array('SELECT 1 FROM puzzles WHERE id = ?', undef, $puzzle_id);
+        my $rows = $dbh->selectall_arrayref(
+            'SELECT c.user_id, u.username, c.body, c.updated_at, pc.cleared_at,
+                    (c.user_id = ?) AS mine
+               FROM puzzle_comments c
+               JOIN users u ON u.id = c.user_id
+               LEFT JOIN puzzle_clears pc ON pc.user_id = c.user_id AND pc.puzzle_id = c.puzzle_id
+              WHERE c.puzzle_id = ?
+              ORDER BY c.updated_at ASC',
+            { Slice => {} }, $uid, $puzzle_id
+        );
+        for my $r (@$rows) {
+            $r->{user_id} = 0 + $r->{user_id};
+            $r->{mine}    = pgbool($r->{mine});
+        }
+        my ($mine, $cleared);
+        if ($u) {
+            $mine = $dbh->selectrow_hashref(
+                'SELECT c.body, c.updated_at, pc.cleared_at
+                   FROM puzzle_comments c
+                   LEFT JOIN puzzle_clears pc ON pc.user_id = c.user_id AND pc.puzzle_id = c.puzzle_id
+                  WHERE c.puzzle_id = ? AND c.user_id = ?',
+                undef, $puzzle_id, $uid
+            );
+            $cleared = $dbh->selectrow_array(
+                'SELECT 1 FROM puzzle_clears WHERE user_id = ? AND puzzle_id = ?',
+                undef, $uid, $puzzle_id
+            );
+        }
+        respond({
+            comments => $rows,
+            mine     => $mine,
+            cleared  => $cleared ? JSON::PP::true : JSON::PP::false,
+        });
+    }
+    elsif ($action eq 'puzzle_comment' && $method eq 'PUT') {
+        # クリアコメントの登録/変更。そのパズルをクリアした人（puzzle_clears に行がある人）
+        # だけが、パズルごとに1件書ける。既にあれば上書き（=「変更」）。
+        my $u = require_user($dbh);
+        my $body = read_body_json();
+        my $puzzle_id = int($body->{puzzle_id} || 0);
+        my $text = $body->{body};
+        fail('bad_request') if $puzzle_id < 1 || !defined $text || ref($text);
+        $text =~ s/\A\s+//;
+        $text =~ s/\s+\z//;
+        fail('bad_request') if $text eq '';
+        # 長さはコードポイント数で数える（JSON デコード済みの文字列なので length がそれ）。
+        fail('comment_too_long') if length($text) > $MAX_COMMENT_LENGTH;
+        fail('puzzle_removed', '404 Not Found')
+            unless $dbh->selectrow_array('SELECT 1 FROM puzzles WHERE id = ?', undef, $puzzle_id);
+        fail('not_cleared', '403 Forbidden')
+            unless $dbh->selectrow_array(
+                'SELECT 1 FROM puzzle_clears WHERE user_id = ? AND puzzle_id = ?',
+                undef, $u->{id}, $puzzle_id);
+        $dbh->do(
+            'INSERT INTO puzzle_comments (user_id, puzzle_id, body, updated_at)
+             VALUES (?,?,?, now())
+             ON CONFLICT (user_id, puzzle_id)
+             DO UPDATE SET body = EXCLUDED.body, updated_at = now()',
+            undef, $u->{id}, $puzzle_id, $text
+        );
         respond({ ok => JSON::PP::true });
     }
     else {

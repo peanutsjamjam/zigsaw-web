@@ -282,6 +282,82 @@
 }
 .selection-back:hover { color: var(--text); border-color: var(--accent); }
 
+/* パズル情報カードの画面名は「パズル情報」⇔「コメント」のタブ切り替えを兼ねる。
+   縦に並べたボタンで、右端は角丸にせずカードの左辺にぴったり接触させて
+   「カードに付いたタブ」に見せる。選択中のタブはカードと同じ背景色でつながって見せる。 */
+.selection-tabs {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  right: 100%;   /* カードに接触させる（画面名の 10px の隙間をなくす） */
+}
+.selection-tab-row { display: flex; align-items: center; gap: 4px; }
+.selection-tab {
+  font: inherit;
+  line-height: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-right: 0;               /* カードに接する側は枠線も付けない */
+  border-radius: 8px 0 0 8px;    /* 右端は角丸をやめる */
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.selection-tab:hover { color: var(--text); border-color: var(--accent); }
+.selection-tab.active {
+  background: var(--panel);      /* カードと同じ背景でつながって見せる */
+  color: var(--text);
+  cursor: default;
+}
+
+/* コメントタブ。左に区切り線入りの画像（パズル情報画面と同じ）、右にコメント一覧。 */
+.comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-width: min(320px, 100%);
+  max-width: 480px;
+  max-height: var(--card-image-h);
+  overflow-y: auto;
+}
+.comment {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.comment-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.comment-user { font-weight: 600; }
+.comment-cleared { font-size: 12px; color: var(--muted); }
+.comment-body { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* コメントの入力欄（クリアした人にだけ出す）。下の行は文字数と「登録/変更」ボタン。 */
+.comment-form { display: flex; flex-direction: column; gap: 6px; }
+.comment-form textarea {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  resize: vertical;
+  min-height: 72px;
+}
+.comment-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.comment-count { font-size: 12px; color: var(--muted); }
+.comment-count.over { color: var(--danger); }
+/* 自分のコメントカードの「変更」ボタン。ユーザ名・クリア日時の行の右端に小さく置く。 */
+.comment-edit-btn { margin-left: auto; padding: 2px 10px; font-size: 12px; }
+
 .preview-row { display: flex; gap: 16px; }
 .preview-slot { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .preview-caption { font-size: 12px; color: var(--muted); }
@@ -852,6 +928,9 @@ input.mismatch { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger
 @media (max-width: 1100px) {
   /* カードの外に置くと画面からはみ出すので、従来どおりカードの左上に戻す。 */
   .selection-name { right: auto; left: 8px; }
+  /* カード内では左寄せにし、カードに接触させる前提の「右だけ角丸なし」もやめる。 */
+  .selection-tabs { align-items: flex-start; }
+  .selection-tab { border-right: 1px solid var(--border); border-radius: 8px; }
 }
 
 @media (max-width: 700px) {

@@ -16,7 +16,7 @@ Zigsaw（Web 版）の技術的な構成・API・開発フロー。概要は [..
 api.cgi (Perl CGI, suexec で sugawara 実行)
    │  DBI / DBD::Pg (peer 認証・パスワード不要)
    ▼
-PostgreSQL  DB: zigsaw  (users / sessions / signup_tokens / reset_tokens / images / puzzles / progress / puzzle_clears)
+PostgreSQL  DB: zigsaw  (users / sessions / signup_tokens / reset_tokens / images / puzzles / progress / puzzle_clears / puzzle_comments)
    +
 appdata/full, appdata/thumb (画像の実ファイル。Apache が静的配信)
 ```
@@ -54,6 +54,11 @@ appdata/full, appdata/thumb (画像の実ファイル。Apache が静的配信)
   1行で持つ（`UNIQUE(user_id, puzzle_id)` 相当の複合主キー、`cleared_at` は最初のクリア日時）。
   progress 保存時にサーバー側でクリア状態を検出して記録する。progress 由来の「クリア済み」表示は
   再プレイの上書きで消えるが、こちらは残り続ける。いまのところ画面表示には使っていない。
+- **クリアコメント** = `puzzle_comments` テーブル。そのパズルをクリアした人（`puzzle_clears` に行がある人）
+  だけが書ける。1ユーザー・1パズルにつき1件（複合主キー）で、登録済みなら上書き（＝「変更」）。
+  本文はコードポイントで200文字まで（DB の CHECK と api.cgi の両方で検査）。
+  パズル情報カードの「コメント」タブに一覧＋入力欄が出て、完成ダイアログの
+  「クリアコメントを書く」からもそのタブへ直行できる。
 
 ### ソース（フロント）
 
@@ -94,6 +99,8 @@ appdata/full, appdata/thumb (画像の実ファイル。Apache が静的配信)
 | GET | progress | 自分の途中経過一覧（要ログイン。パズル＋画像情報つき） |
 | PUT | progress | `{puzzle_id,state}` 保存（upsert。要ログイン。クリア状態なら puzzle_clears にクリア歴も記録） |
 | DELETE | progress&id=ID | 途中経過を削除（要ログイン） |
+| GET | puzzle_comments&puzzle_id=ID | クリアコメント一覧（誰でも。自分の分は mine で返る） |
+| PUT | puzzle_comment | `{puzzle_id,body}` クリアコメントの登録/変更（クリアした人のみ・1人1件・200文字まで） |
 
 ## 遊び方の仕組み（mac 版と同じ）
 
@@ -184,7 +191,7 @@ dev（`~/public_html/zigsaw` → `/~sugawara/zigsaw/`）とは別系統の本番
 - システム perl `/usr/bin/perl` に `perl-DBI` / `perl-DBD-Pg` / `perl-JSON-PP` / `perl-Digest-SHA` を導入済み。
 - DB `zigsaw` は作成済み（`createdb zigsaw`）。スキーマは `ddl/` にリレーションごとに置いてある。
   新規構築は依存順に流す:
-  `for f in users sessions signup_tokens reset_tokens access_log rate_events images puzzles progress puzzle_clears; do psql -d zigsaw -f ddl/$f.sql; done`。
+  `for f in users sessions signup_tokens reset_tokens access_log rate_events images puzzles progress puzzle_clears puzzle_comments; do psql -d zigsaw -f ddl/$f.sql; done`。
 - CGI は suexec で `sugawara` として動くため、peer 認証でパスワード無し接続できる。
 - 環境名は `env.pl`（git 管理外。`env.pl.example` をコピーして作る）の `$main::ZIGSAW_ENV`。
 - メール送信は `/usr/sbin/sendmail` を使う（差出人 `zigsaw@peanutsjamjam.jp`）。

@@ -167,6 +167,48 @@ is db_scalar("SELECT cleared_at FROM puzzle_clears WHERE user_id = $alice_id AND
 is db_scalar("SELECT count(*) FROM puzzle_clears WHERE user_id = $bob_id"), '0',
     'クリア歴: クリアしていないユーザーには付かない';
 
+# ---- クリアコメント（puzzle_comments） ----------------------------------------------
+# クリアした人（puzzle_clears に行がある人）だけが、パズルごとに1件書ける。
+$res = api_put(action => 'puzzle_comment', body => { puzzle_id => $p2, body => 'よかった' });
+is $res->{status}, 401, 'コメント: 未ログインは 401';
+$res = api_put(action => 'puzzle_comment', sid => $bob, body => { puzzle_id => $p2, body => 'よかった' });
+is $res->{status}, 403, 'コメント: クリアしていない人は 403';
+is $res->{json}{error}, 'not_cleared', 'コメント: error=not_cleared';
+$res = api_put(action => 'puzzle_comment', sid => $alice, body => { puzzle_id => $p2, body => '   ' });
+is $res->{json}{error}, 'bad_request', 'コメント: 空白だけは 400';
+$res = api_put(action => 'puzzle_comment', sid => $alice, body => { puzzle_id => $p2, body => 'あ' x 201 });
+is $res->{json}{error}, 'comment_too_long', 'コメント: 201文字（コードポイント）は弾く';
+$res = api_put(action => 'puzzle_comment', sid => $alice, body => { puzzle_id => $p2, body => 'あ' x 200 });
+is $res->{status}, 200, 'コメント: 200文字ちょうど（UTF-8 では 600 バイト）は登録できる';
+$res = api_put(action => 'puzzle_comment', sid => $alice, body => { puzzle_id => $p2, body => '楽しかった！' });
+is $res->{status}, 200, 'コメント: もう一度登録すると変更になる';
+is db_scalar("SELECT count(*) FROM puzzle_comments WHERE user_id = $alice_id"), '1',
+    'コメント: パズルごとに1件（upsert で行は増えない）';
+is db_scalar("SELECT body FROM puzzle_comments WHERE user_id = $alice_id AND puzzle_id = $p2"),
+    do { my $s = '楽しかった！'; utf8::encode($s); $s },   # psql の出力は UTF-8 バイト列
+    'コメント: 本文が上書きされている';
+
+# 一覧: 自分のコメントも時系列順で一覧に混ざり（mine フラグ付き）、別枠の mine にも返る。
+$res = api_get(action => 'puzzle_comments', query => { puzzle_id => $p2 }, sid => $alice);
+is $res->{status}, 200, 'コメント一覧: 200';
+is $res->{json}{mine}{body}, '楽しかった！', 'コメント一覧: 自分のコメントは mine にも入る';
+is scalar @{ $res->{json}{comments} }, 1, 'コメント一覧: 自分のコメントも一覧に載る';
+ok $res->{json}{comments}[0]{mine}, 'コメント一覧: 自分の行は mine=true';
+ok $res->{json}{cleared}, 'コメント一覧: クリア済みなら cleared=true';
+
+$res = api_get(action => 'puzzle_comments', query => { puzzle_id => $p2 }, sid => $bob);
+is scalar @{ $res->{json}{comments} }, 1, 'コメント一覧: 他人のコメントが一覧に載る';
+is $res->{json}{comments}[0]{username}, 'alice', 'コメント一覧: ユーザ名が付く';
+ok $res->{json}{comments}[0]{cleared_at}, 'コメント一覧: クリアした日時が付く';
+ok !$res->{json}{comments}[0]{mine}, 'コメント一覧: 他人の行は mine=false';
+is $res->{json}{mine}, undef, 'コメント一覧: コメントしていなければ mine は null';
+ok !$res->{json}{cleared}, 'コメント一覧: クリアしていなければ cleared=false';
+
+$res = api_get(action => 'puzzle_comments', query => { puzzle_id => $p2 });
+is $res->{status}, 200, 'コメント一覧: 未ログインでも見られる';
+$res = api_get(action => 'puzzle_comments', query => { puzzle_id => 999999 });
+is $res->{status}, 404, 'コメント一覧: 無いパズルは 404';
+
 # ---- パズル削除 --------------------------------------------------------------------
 $res = api_delete(action => 'puzzle', query => { id => $p1 });
 is $res->{status}, 401, 'パズル削除: 未ログインは 401';

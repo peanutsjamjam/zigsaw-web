@@ -4,7 +4,7 @@
 //   「プレイしたパズル」… ログイン中の自分が遊んだパズル（プレイ中／クリア済み）。再開・再挑戦する。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlaskConical, Plus, ShieldAlert, Trash2, Triangle, Upload, X } from 'lucide-react'
-import { api, ApiError, type Account, type GalleryImage, type ListFilter, type ProgressItem, type Puzzle } from '../api'
+import { api, ApiError, type Account, type GalleryImage, type ListFilter, type ProgressItem, type Puzzle, type PuzzleCommentsResult } from '../api'
 import { prepareUpload } from '../lib/generator'
 import type { SavedProgress } from '../api'
 import { PLACEHOLDER_WALK_FRAMES, SHAPE_IMAGES } from '../lib/shapes'
@@ -27,6 +27,9 @@ const MAX_TAG_SUGGESTIONS = 8
 const MAX_TAG_LENGTH = 30
 const MAX_TAGS_PER_IMAGE = 20
 
+// クリアコメント1件の最大長（コードポイント数。api.cgi の $MAX_COMMENT_LENGTH と揃える）。
+const MAX_COMMENT_LENGTH = 200
+
 export type StartRequest = {
   puzzle: Puzzle
   /** 続きから始めるなら復元する状態。最初から始めるなら null。 */
@@ -37,6 +40,9 @@ type Props = {
   account: Account | null
   /** 実行環境が development か。true のときだけ開発用フラスコボタンを出す。 */
   isDev: boolean
+  /** ゲームの完成ダイアログから「クリアコメントを書く」で戻ってきたとき、
+      このパズルのコメントタブを開いた状態で始める。通常は null。 */
+  initialCommentsPuzzle: Puzzle | null
   onStart: (req: StartRequest) => void
   /** フラスコボタン: 画面全体を開発用ビューへ切り替える。 */
   onOpenDev: () => void
@@ -92,7 +98,7 @@ function filtersLabel(filters: Filter[]): string {
   return filters.map(filterLabel).join('・')
 }
 
-export function SetupView({ account, isDev, onStart, onOpenDev, onOpenDevLog, onRequestLogin, onLoggedOut, busy }: Props) {
+export function SetupView({ account, isDev, initialCommentsPuzzle, onStart, onOpenDev, onOpenDevLog, onRequestLogin, onLoggedOut, busy }: Props) {
   // images / puzzles は「いま表示しているページのぶんだけ」。総件数は total で持つ。
   const [images, setImages] = useState<GalleryImage[]>([])
   const [imagesTotal, setImagesTotal] = useState(0)
@@ -108,7 +114,10 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onOpenDevLog, on
   const [listVersion, setListVersion] = useState(0)
   // 選択中パズルの元画像（画像一覧の今のページに無くても引けるよう、id で取得する）。
   const [imageForSelectedPuzzle, setImageForSelectedPuzzle] = useState<GalleryImage | null>(null)
-  const [selection, setSelection] = useState<Selection | null>(null)
+  // 「クリアコメントを書く」から戻ってきたときは、そのパズルのコメントタブを開いて始める。
+  const [selection, setSelection] = useState<Selection | null>(
+    initialCommentsPuzzle ? { kind: 'puzzle', puzzle: initialCommentsPuzzle, mode: 'edit' } : null,
+  )
   const [columns, setColumns] = useState(6)
   const [rows, setRows] = useState(4)
   const [loading, setLoading] = useState(true)
@@ -150,6 +159,61 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onOpenDevLog, on
   const [headCollapsed, setHeadCollapsed] = useState(false)
   // プレイ中パズルの画像エリアのタブ（完成図 / 現在の様子）。既定は「現在の様子」。
   const [puzzleTab, setPuzzleTab] = useState<'finished' | 'current'>('current')
+  // パズル情報画面（mode:'edit'）のタブ。「パズル情報」と「コメント」をカード内側だけ
+  // 切り替えて出す。
+  const [puzzleInfoTab, setPuzzleInfoTab] = useState<'info' | 'comments'>(
+    initialCommentsPuzzle ? 'comments' : 'info',
+  )
+  // コメントタブの内容（一覧・自分のコメント・クリア済みか）と入力欄の状態。
+  const [commentsData, setCommentsData] = useState<PuzzleCommentsResult | null>(null)
+  const [commentsError, setCommentsError] = useState<string | null>(null)
+  const [commentDraft, setCommentDraft] = useState('')
+  const [savingComment, setSavingComment] = useState(false)
+  // 自分のコメントを編集中か。普段は他のコメントと同様のカード表示で、
+  // カード上の「変更」ボタンを押したときだけ入力欄を出す。未登録ならはじめから入力欄。
+  const [editingComment, setEditingComment] = useState(false)
+
+  // コメントタブを開いているパズルの id（開いていなければ null）。
+  const commentsPuzzleId =
+    selection?.kind === 'puzzle' && selection.mode === 'edit' && puzzleInfoTab === 'comments'
+      ? selection.puzzle.id : null
+
+  // コメントタブを開いたら読み込む。自分のコメントがあれば入力欄に入れる（＝変更できる）。
+  useEffect(() => {
+    if (commentsPuzzleId == null) return
+    let cancelled = false
+    setCommentsData(null)
+    setCommentsError(null)
+    setEditingComment(false)
+    api.puzzleComments(commentsPuzzleId)
+      .then((r) => {
+        if (cancelled) return
+        setCommentsData(r)
+        setCommentDraft(r.mine?.body ?? '')
+      })
+      .catch((err) => { if (!cancelled) setCommentsError(err instanceof Error ? err.message : String(err)) })
+    return () => { cancelled = true }
+  }, [commentsPuzzleId])
+
+  const saveComment = async () => {
+    if (commentsPuzzleId == null) return
+    const text = commentDraft.trim()
+    if (!text) return
+    setSavingComment(true)
+    setCommentsError(null)
+    try {
+      await api.savePuzzleComment(commentsPuzzleId, text)
+      // 登録/変更後は読み直し、入力欄を閉じて通常のカード表示に戻す。
+      const r = await api.puzzleComments(commentsPuzzleId)
+      setCommentsData(r)
+      setCommentDraft(r.mine?.body ?? text)
+      setEditingComment(false)
+    } catch (err) {
+      setCommentsError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingComment(false)
+    }
+  }
   // 「現在の様子」スナップショットは一覧に含まれないので、詳細を開いたとき progress id ごとに
   // 個別取得してここにキャッシュする。値 undefined=未取得, null=保存なし, string=data URL。
   const [snapshotById, setSnapshotById] = useState<Record<number, string | null>>({})
@@ -272,7 +336,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onOpenDevLog, on
     setError(null)
   }
   // パズル一覧から選ぶと編集画面、プレイしたパズルから選ぶとプレイ画面。
-  const selectPuzzleForEdit = (puzzle: Puzzle) => { setSelection({ kind: 'puzzle', puzzle, mode: 'edit' }); setError(null) }
+  const selectPuzzleForEdit = (puzzle: Puzzle) => { setSelection({ kind: 'puzzle', puzzle, mode: 'edit' }); setPuzzleInfoTab('info'); setError(null) }
   const selectPuzzleForPlay = (puzzle: Puzzle) => { setSelection({ kind: 'puzzle', puzzle, mode: 'play' }); setPuzzleTab('current') }
 
   // ログイン中の自分の画像（または管理者）のみ display_name・tags を変更できる。
@@ -494,6 +558,7 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onOpenDevLog, on
       const puzzle = await api.createPuzzle(selection.image.id, columns, rows)
       await reload()
       setSelection({ kind: 'puzzle', puzzle, mode: 'edit' })
+      setPuzzleInfoTab('info')
       setCreatedNotice(true)
       window.setTimeout(() => setCreatedNotice(false), 2000)
     } catch (err) {
@@ -603,21 +668,38 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onOpenDevLog, on
             <div className="selection-name">画像情報</div>
           )}
           {/* パズル一覧から開いたパズル情報編集画面のとき。
-              左の「＜」で、そのパズルの元画像の画像情報画面へ戻れる。 */}
+              左の「＜」で、そのパズルの元画像の画像情報画面へ戻れる。
+              画面名の下に「コメント」リンクがあり、タブのようにカード内側だけを
+              「パズル情報」（従来の画面）⇔「コメント」（まだ空）で切り替える。 */}
           {selection.kind === 'puzzle' && selection.mode === 'edit' && (
-            <div className="selection-name">
-              {imageForSelectedPuzzle && (
+            <div className="selection-name selection-tabs">
+              <div className="selection-tab-row">
+                {imageForSelectedPuzzle && (
+                  <button
+                    type="button"
+                    className="selection-back"
+                    onClick={() => selectImage(imageForSelectedPuzzle)}
+                    title="この画像の画像情報へ"
+                    aria-label="この画像の画像情報へ"
+                  >
+                    ＜
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="selection-back"
-                  onClick={() => selectImage(imageForSelectedPuzzle)}
-                  title="この画像の画像情報へ"
-                  aria-label="この画像の画像情報へ"
+                  className={`selection-tab${puzzleInfoTab === 'info' ? ' active' : ''}`}
+                  onClick={() => setPuzzleInfoTab('info')}
                 >
-                  ＜
+                  パズル情報
                 </button>
-              )}
-              パズル情報
+              </div>
+              <button
+                type="button"
+                className={`selection-tab${puzzleInfoTab === 'comments' ? ' active' : ''}`}
+                onClick={() => setPuzzleInfoTab('comments')}
+              >
+                コメント
+              </button>
             </div>
           )}
           {/* 画像からピース数を決めるパズル作成画面のとき。
@@ -987,7 +1069,98 @@ export function SetupView({ account, isDev, onStart, onOpenDev, onOpenDevLog, on
 
           {/* パズル一覧から選んだとき（mode:'edit'）: 作成画面と同様（画像＋分割線＋情報）だが、
               ピース数は変更不可・作成ボタン無し。プレイと削除のボタンを置く。 */}
-          {selection.kind === 'puzzle' && selection.mode === 'edit' && (() => {
+          {/* コメントタブ。カードの内側だけを差し替える。
+              左にパズル情報画面と同じ区切り線入りの画像、右にクリアコメント。
+              クリアした人（cleared=true）には入力欄も出す。1人1件で、登録済みなら
+              入力欄に自分のコメントが入っていて「変更」できる。 */}
+          {selection.kind === 'puzzle' && selection.mode === 'edit' && puzzleInfoTab === 'comments' && (() => {
+            const p = selection.puzzle
+            const draftLength = [...commentDraft.trim()].length   // コードポイント数で数える
+            const overLimit = draftLength > MAX_COMMENT_LENGTH
+            return (
+              <div className="edit-layout">
+                <div
+                  className="piece-grid"
+                  style={{
+                    width: `min(640px, calc(var(--card-image-h) * ${p.width} / ${p.height}))`,
+                    aspectRatio: `${p.width} / ${p.height}`,
+                  }}
+                >
+                  <img src={p.thumb_url} alt="" />
+                  <div className="piece-grid-lines" style={{ backgroundSize: `calc(100% / ${p.columns}) calc(100% / ${p.rows})` }} />
+                </div>
+                <div className="comment-list">
+                  {commentsError && <div className="error">{commentsError}</div>}
+                  {commentsData === null && !commentsError ? (
+                    <div className="muted">読み込み中…</div>
+                  ) : commentsData && (() => {
+                    // 入力欄。未登録なら一覧の下（新しいものほど下なので末尾）に「登録」として、
+                    // 登録済みなら自分の行の位置に「変更」として出す。
+                    const commentForm = (
+                      <div className="comment-form">
+                        <textarea
+                          value={commentDraft}
+                          rows={3}
+                          placeholder="クリアコメントを書く（200文字まで）"
+                          onChange={(e) => setCommentDraft(e.target.value)}
+                        />
+                        <div className="comment-form-foot">
+                          <span className={`comment-count${overLimit ? ' over' : ''}`}>
+                            {draftLength}/{MAX_COMMENT_LENGTH}
+                          </span>
+                          <button
+                            type="button"
+                            className="btn primary"
+                            disabled={savingComment || draftLength === 0 || overLimit}
+                            onClick={() => void saveComment()}
+                          >
+                            {savingComment ? '保存中…' : commentsData.mine ? '変更' : '登録'}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                    return (
+                      <>
+                        {!commentsData.cleared && (
+                          <div className="muted">コメントは、このパズルをクリアした人だけが書けます。</div>
+                        )}
+                        {commentsData.comments.length === 0 && (
+                          <div className="muted">まだコメントはありません。</div>
+                        )}
+                        {/* 自分のコメントも時系列順（新しいものほど下）で混ざる。
+                            自分の行には「変更」ボタンが付き、押すとその位置が入力欄になる。 */}
+                        {commentsData.comments.map((c) => (
+                          c.mine && editingComment ? (
+                            <div key={c.user_id}>{commentForm}</div>
+                          ) : (
+                            <div key={c.user_id} className="comment">
+                              <div className="comment-head">
+                                <span className="comment-user">{c.username}</span>
+                                {c.cleared_at && <span className="comment-cleared">クリア: {formatTimestamp(c.cleared_at)}</span>}
+                                {c.mine && (
+                                  <button
+                                    type="button"
+                                    className="btn comment-edit-btn"
+                                    onClick={() => setEditingComment(true)}
+                                  >
+                                    変更
+                                  </button>
+                                )}
+                              </div>
+                              <div className="comment-body">{c.body}</div>
+                            </div>
+                          )
+                        ))}
+                        {commentsData.cleared && !commentsData.mine && commentForm}
+                      </>
+                    )
+                  })()}
+                </div>
+              </div>
+            )
+          })()}
+
+          {selection.kind === 'puzzle' && selection.mode === 'edit' && puzzleInfoTab === 'info' && (() => {
             const p = selection.puzzle
             const canDelete = p.mine || account?.is_admin === true
             const inUse = p.play_count > 0

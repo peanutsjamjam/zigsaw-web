@@ -93,6 +93,24 @@ export type DevStorage = {
 // 出すためのスナップショット画像（data URL）を足したもの。snapshot はゲーム進行には使わない。
 export type SavedProgress = SavedGameState & { snapshot?: string }
 
+// クリアコメント1件（puzzle_comments が返す）。そのパズルをクリアした人だけが書ける。
+export type PuzzleComment = {
+  user_id: number
+  username: string
+  body: string
+  cleared_at: string | null   // そのパズルをクリアした日時（クリア歴由来）
+  updated_at: string
+  mine: boolean               // 自分のコメントか（この行に「変更」ボタンが付く）
+}
+
+// puzzle_comments の応答。自分のコメントも時系列順で comments に混ざる（mine フラグ付き）。
+// 別枠の mine は入力欄の初期値と「登録/変更」の出し分けに使う。
+export type PuzzleCommentsResult = {
+  comments: PuzzleComment[]
+  mine: { body: string; cleared_at: string | null; updated_at: string } | null
+  cleared: boolean   // 自分がこのパズルをクリア済みか（＝コメントを書けるか）
+}
+
 // 途中経過1件（progress が返す）。どのパズルの途中かを puzzle 情報つきで持つ。
 export type ProgressItem = {
   id: number
@@ -140,6 +158,8 @@ const MESSAGES: Record<string, string> = {
   forbidden: 'この操作をする権限がありません。',
   not_found: '見つかりませんでした。',
   puzzle_removed: 'このパズルは管理者によって削除されました。',
+  not_cleared: 'コメントは、このパズルをクリアした人だけが書けます。',
+  comment_too_long: 'コメントが長すぎます（200文字まで）。',
   quarantine_failed: '退避に失敗しました。サーバーのログを確認してください。',
   db_error: 'サーバーでエラーが発生しました。',
   server_error: 'サーバーでエラーが発生しました。',
@@ -249,4 +269,10 @@ export const api = {
   saveProgress: (puzzle_id: number, state: SavedProgress) =>
     request<{ id: number }>('?action=progress', { method: 'PUT', body: JSON.stringify({ puzzle_id, state }) }),
   deleteProgress: (id: number) => request<{ ok: true }>(`?action=progress&id=${id}`, { method: 'DELETE' }),
+
+  // クリアコメント。一覧は誰でも、登録/変更（upsert）はクリアした人だけ。
+  puzzleComments: (puzzleId: number) =>
+    request<PuzzleCommentsResult>(`?action=puzzle_comments&puzzle_id=${puzzleId}`),
+  savePuzzleComment: (puzzleId: number, body: string) =>
+    request<{ ok: true }>('?action=puzzle_comment', { method: 'PUT', body: JSON.stringify({ puzzle_id: puzzleId, body }) }),
 }

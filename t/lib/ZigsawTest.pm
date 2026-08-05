@@ -137,7 +137,7 @@ EOF
     run_or_die('dropdb', '--if-exists', $TEST_DB);
     run_or_die('createdb', $TEST_DB);
     for my $f (qw(users.sql images.sql tags.sql puzzles.sql progress.sql puzzle_clears.sql
-                  sessions.sql signup_tokens.sql reset_tokens.sql
+                  puzzle_comments.sql sessions.sql signup_tokens.sql reset_tokens.sql
                   access_log.sql rate_events.sql)) {
         run_or_die('psql', '-q', '-v', 'ON_ERROR_STOP=1', '-d', $TEST_DB, '-f', "$ROOT/ddl/$f");
     }

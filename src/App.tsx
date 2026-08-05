@@ -18,7 +18,7 @@ import './App.css'
 //   - 起動時に me でログイン状態を確認する（未ログインでもギャラリーは見て遊べる）。
 //   - ?signup=<token> / ?reset=<token> があれば、その画面を最優先で開く。
 //   - 遊んでいる最中のパズルがあれば盤面を、無ければ選択画面（ギャラリー）を出す。
-type Session = { id: number; game: PuzzleGameState; puzzleId: number; columns: number; rows: number; displayName: string }
+type Session = { id: number; game: PuzzleGameState; puzzle: Puzzle; puzzleId: number; columns: number; rows: number; displayName: string }
 let nextSessionId = 1
 
 export default function App() {
@@ -34,6 +34,9 @@ export default function App() {
   const [showDevLogView, setShowDevLogView] = useState(false)
   const [session, setSession] = useState<Session | null>(null)
   const [busy, setBusy] = useState(false)
+  // 完成ダイアログの「クリアコメントを書く」で選択画面へ戻るとき、そのパズルの
+  // コメントタブを開いた状態で始めるための受け渡し。次のゲーム開始時にクリアする。
+  const [commentsPuzzle, setCommentsPuzzle] = useState<Puzzle | null>(null)
   const [signupToken, setSignupToken] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get('signup'),
   )
@@ -90,6 +93,7 @@ export default function App() {
     setSession({
       id: nextSessionId++,
       game: new PuzzleGameState(pieces, boardSize, resumeState),
+      puzzle,
       puzzleId: puzzle.id,
       columns: puzzle.columns,
       rows: puzzle.rows,
@@ -99,6 +103,7 @@ export default function App() {
 
   const start = useCallback(async (req: StartRequest) => {
     setBusy(true)
+    setCommentsPuzzle(null)
     try { await startPuzzle(req.puzzle, req.resumeState) }
     finally { setBusy(false) }
   }, [startPuzzle])
@@ -149,6 +154,7 @@ export default function App() {
         settings={settings}
         onSettingsChange={setSettings}
         onExit={exit}
+        onWriteComment={account ? () => { setCommentsPuzzle(session.puzzle); exit() } : null}
       />
     )
   }
@@ -160,6 +166,7 @@ export default function App() {
         key={account?.username ?? 'guest'}
         account={account}
         isDev={isDev}
+        initialCommentsPuzzle={commentsPuzzle}
         onStart={(req) => void start(req)}
         onOpenDev={() => setShowDevView(true)}
         onOpenDevLog={() => setShowDevLogView(true)}

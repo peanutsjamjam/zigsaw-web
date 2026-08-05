@@ -18,6 +18,9 @@ type Props = {
   settings: AppSettings
   onSettingsChange: (settings: AppSettings) => void
   onExit: () => void
+  /** 完成ダイアログの「クリアコメントを書く」。ゲームを終了して、このパズルの
+      コメントタブへ移る。未ログイン（クリア歴が記録されず書き込めない）なら null。 */
+  onWriteComment: (() => void) | null
 }
 
 /** HUD に出る状態（経過時間・一時停止・完成）の変化を React へ伝える。 */
@@ -28,7 +31,7 @@ function useGameState(game: PuzzleGameState): number {
   )
 }
 
-export function GameView({ game, puzzleId, displayName, canSave, settings, onSettingsChange, onExit }: Props) {
+export function GameView({ game, puzzleId, displayName, canSave, settings, onSettingsChange, onExit, onWriteComment }: Props) {
   useGameState(game)
   const viewProvider = useRef<(() => ViewState) | null>(null)
   const [dismissedCompletion, setDismissedCompletion] = useState(false)
@@ -157,6 +160,17 @@ export function GameView({ game, puzzleId, displayName, canSave, settings, onSet
           <div className="panel">
             <h2>完成しました！</h2>
             <p className="muted">所要時間: {formatElapsed(game.elapsedSeconds)}</p>
+            {onWriteComment && (
+              <div className="row">
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={(e) => { e.stopPropagation(); onWriteComment() }}
+                >
+                  クリアコメントを書く
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
