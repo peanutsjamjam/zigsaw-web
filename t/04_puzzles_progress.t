@@ -142,6 +142,31 @@ is $res->{json}{snapshot}, 'data:image/png;base64,SNAP', 'snapshot: 本人は取
 $res = api_get(action => 'progress_snapshot', query => { id => $prog1 }, sid => $alice);
 is $res->{json}{snapshot}, undef, 'snapshot: 他人の progress は null';
 
+# ---- クリア歴（puzzle_clears） ------------------------------------------------------
+# 全ピースが1つのかたまりになった state を保存すると、クリア歴として1行記録される。
+# 画面の「プレイ中/クリア済み」判定（progress.state 由来）とは独立で、行は残り続ける。
+my $done4 = { groups => [ [0, 1, 2, 3] ], elapsed => 30 };   # p2 は 2x2 = 4 ピース
+$res = api_put(action => 'progress', sid => $alice, body => { puzzle_id => $p2, state => $done4 });
+is $res->{status}, 200, 'クリア歴: クリア状態の保存は 200';
+is db_scalar("SELECT count(*) FROM puzzle_clears WHERE user_id = $alice_id AND puzzle_id = $p2"), '1',
+    'クリア歴: puzzle_clears に1行記録される';
+my $cleared_at = db_scalar("SELECT cleared_at FROM puzzle_clears WHERE user_id = $alice_id AND puzzle_id = $p2");
+
+$res = api_put(action => 'progress', sid => $alice,
+    body => { puzzle_id => $p2, state => { groups => [ [0], [1], [2], [3] ], elapsed => 5 } });
+is $res->{status}, 200, 'クリア歴: 再プレイ（途中状態）の保存も 200';
+is db_scalar("SELECT count(*) FROM puzzle_clears WHERE user_id = $alice_id AND puzzle_id = $p2"), '1',
+    'クリア歴: 再プレイで progress を上書きしても行は残る';
+
+$res = api_put(action => 'progress', sid => $alice, body => { puzzle_id => $p2, state => $done4 });
+is db_scalar("SELECT count(*) FROM puzzle_clears WHERE user_id = $alice_id AND puzzle_id = $p2"), '1',
+    'クリア歴: 再クリアしても1行のまま';
+is db_scalar("SELECT cleared_at FROM puzzle_clears WHERE user_id = $alice_id AND puzzle_id = $p2"),
+    $cleared_at, 'クリア歴: cleared_at は最初のクリア日時を保つ';
+
+is db_scalar("SELECT count(*) FROM puzzle_clears WHERE user_id = $bob_id"), '0',
+    'クリア歴: クリアしていないユーザーには付かない';
+
 # ---- パズル削除 --------------------------------------------------------------------
 $res = api_delete(action => 'puzzle', query => { id => $p1 });
 is $res->{status}, 401, 'パズル削除: 未ログインは 401';

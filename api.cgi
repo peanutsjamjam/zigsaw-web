@@ -14,7 +14,7 @@ use Socket qw(inet_pton AF_INET AF_INET6);
 # 配信:  Apache UserDir 配下、suexec で sugawara として実行される。
 #        そのため PostgreSQL へは peer 認証（パスワード不要）で接続できる。
 # DB:    zigsaw（users / sessions / signup_tokens / reset_tokens / access_log / rate_events / images /
-#        tags / image_tags / puzzles / progress）。
+#        tags / image_tags / puzzles / progress / puzzle_clears）。
 #        画像のタグは tags / image_tags（多対多）。定義は ddl/*.sql 参照。
 # 認証:  ログイン時にランダムトークンを sessions に保存し、HttpOnly Cookie
 #        (zigsaw_sid) で受け渡す。パスワードは PBKDF2-HMAC-SHA256 で保存。
@@ -1582,8 +1582,9 @@ eval {
         fail('bad_request') if $puzzle_id < 1 || ref($state) ne 'HASH';
         # プレイ中に管理者がその画像を退避（緊急削除）するとパズルごと消える。
         # 遊んでいる人に伝わるよう、専用のコードを返す（フロントはゲームを終了させる）。
-        fail('puzzle_removed', '404 Not Found')
-            unless $dbh->selectrow_array('SELECT 1 FROM puzzles WHERE id = ?', undef, $puzzle_id);
+        my ($p_cols, $p_rows) = $dbh->selectrow_array(
+            'SELECT columns, rows FROM puzzles WHERE id = ?', undef, $puzzle_id);
+        fail('puzzle_removed', '404 Not Found') unless $p_cols;
         my $state_json = $JSON->encode($state);
         # 自動保存で 60 秒ごとに書き込まれる経路なので、1件あたりの上限を設ける。
         fail('payload_too_large', '413 Payload Too Large')
@@ -1595,6 +1596,19 @@ eval {
              DO UPDATE SET state = EXCLUDED.state, updated_at = now()',
             undef, $u->{id}, $puzzle_id, $state_json
         );
+        # クリアした状態（全ピースが1つのグループ）なら、クリア歴として puzzle_clears にも
+        # 1行記録する。画面の「プレイ中/クリア済み」は従来どおり progress.state から導くので、
+        # この行は表示には使わない（再プレイで progress が上書きされても、クリア歴は残る）。
+        # 既に行があれば何もしない（cleared_at は最初のクリア日時を保つ）。
+        my $groups = $state->{groups};
+        if (ref($groups) eq 'ARRAY' && @$groups == 1
+            && ref($groups->[0]) eq 'ARRAY' && @{ $groups->[0] } == $p_cols * $p_rows) {
+            $dbh->do(
+                'INSERT INTO puzzle_clears (user_id, puzzle_id) VALUES (?,?)
+                 ON CONFLICT (user_id, puzzle_id) DO NOTHING',
+                undef, $u->{id}, $puzzle_id
+            );
+        }
         my $id = $dbh->selectrow_array(
             'SELECT id FROM progress WHERE user_id = ? AND puzzle_id = ?',
             undef, $u->{id}, $puzzle_id
