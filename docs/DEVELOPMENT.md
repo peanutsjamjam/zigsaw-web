@@ -16,7 +16,8 @@ Zigsaw（Web 版）の技術的な構成・API・開発フロー。概要は [..
 api.cgi (Perl CGI, suexec で sugawara 実行)
    │  DBI / DBD::Pg (peer 認証・パスワード不要)
    ▼
-PostgreSQL  DB: zigsaw  (users / sessions / signup_tokens / reset_tokens / images / puzzles / progress / puzzle_clears / puzzle_comments)
+PostgreSQL  DB: zigsaw  (users / sessions / signup_tokens / reset_tokens / access_log / rate_events /
+                         images / tags / image_tags / puzzles / progress / puzzle_clears / puzzle_comments)
    +
 appdata/full, appdata/thumb (画像の実ファイル。Apache が静的配信)
 ```
@@ -191,7 +192,8 @@ dev（`~/public_html/zigsaw` → `/~sugawara/zigsaw/`）とは別系統の本番
 - システム perl `/usr/bin/perl` に `perl-DBI` / `perl-DBD-Pg` / `perl-JSON-PP` / `perl-Digest-SHA` を導入済み。
 - DB `zigsaw` は作成済み（`createdb zigsaw`）。スキーマは `ddl/` にリレーションごとに置いてある。
   新規構築は依存順に流す:
-  `for f in users sessions signup_tokens reset_tokens access_log rate_events images puzzles progress puzzle_clears puzzle_comments; do psql -d zigsaw -f ddl/$f.sql; done`。
+  `for f in users sessions signup_tokens reset_tokens access_log rate_events images tags puzzles progress puzzle_clears puzzle_comments; do psql -d zigsaw -f ddl/$f.sql; done`
+  （`tags.sql` は tags と image_tags の2つを作る。`migrate_*.sql` は既存 DB 用なので新規構築では流さない）。
 - CGI は suexec で `sugawara` として動くため、peer 認証でパスワード無し接続できる。
 - 環境名は `env.pl`（git 管理外。`env.pl.example` をコピーして作る）の `$main::ZIGSAW_ENV`。
 - メール送信は `/usr/sbin/sendmail` を使う（差出人 `zigsaw@peanutsjamjam.jp`）。
