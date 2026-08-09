@@ -194,6 +194,18 @@ dev（`~/public_html/zigsaw` → `/~sugawara/zigsaw/`）とは別系統の本番
   新規構築は依存順に流す:
   `for f in users sessions signup_tokens reset_tokens access_log rate_events images tags puzzles progress puzzle_clears puzzle_comments; do psql -d zigsaw -f ddl/$f.sql; done`
   （`tags.sql` は tags と image_tags の2つを作る。`migrate_*.sql` は既存 DB 用なので新規構築では流さない）。
+  - **本番の CGI は role=`apache` で繋ぐので、`apache` への権限付与が要る**（上の「本番」節参照）。
+    いまの DB には `ALTER DEFAULT PRIVILEGES` を設定済みなので、`sugawara` が作ったテーブル/シーケンスには
+    自動で付く（`ddl/*.sql` に GRANT を書かなくてよいのはこのため）。ゼロから DB を作るときは、
+    テーブルを流す前に既定権限を設定しておく:
+    ```
+    psql -d zigsaw -c 'GRANT USAGE ON SCHEMA public TO apache'
+    psql -d zigsaw -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                         GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO apache'
+    psql -d zigsaw -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                         GRANT USAGE,SELECT ON SEQUENCES TO apache'
+    ```
+    設定前に作ってしまったテーブルには `GRANT ... ON ALL TABLES/SEQUENCES IN SCHEMA public TO apache` で追いかける。
 - CGI は suexec で `sugawara` として動くため、peer 認証でパスワード無し接続できる。
 - 環境名は `env.pl`（git 管理外。`env.pl.example` をコピーして作る）の `$main::ZIGSAW_ENV`。
 - メール送信は `/usr/sbin/sendmail` を使う（差出人 `zigsaw@peanutsjamjam.jp`）。
