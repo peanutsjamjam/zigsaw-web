@@ -4,6 +4,14 @@ RewriteEngine On
 # .cgi を CGI スクリプトとして実行
 AddHandler cgi-script .cgi
 
+# 環境ごとの設定ファイルは配信しない。DocumentRoot の中にあるため、指定しないと
+# ブラウザから中身がそのまま読めてしまう（下の RewriteCond -f で実在ファイルは
+# そのまま配信されるので、Rewrite では止まらない）。
+# env.pl.example や作業中のバックアップ (env.pl.bak.*) も巻き込むよう前方一致にする。
+<FilesMatch "^env\.pl">
+    Require all denied
+</FilesMatch>
+
 # リクエストボディの上限。画像アップロード（デコード後 8MB まで）が base64 で
 # 約 4/3 に膨らむぶんの余裕をみた値。api.cgi の $MAX_BODY_BYTES と揃えること。
 # ここで弾ければ CGI プロセスが起動する前に 413 を返せる。
