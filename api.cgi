@@ -2,12 +2,33 @@
 use strict;
 use warnings;
 use utf8;
-use DBI;
 use JSON::PP;
-use Digest::SHA qw(hmac_sha256);
 use MIME::Base64 ();
 use File::Basename qw(dirname);
 use Socket qw(inet_pton AF_INET AF_INET6);
+
+# 共通ライブラリ PJJ（サインアップ/サインインの土台。github.com/peanutsjamjam/pjj-perl5）を
+# @INC に足す。use はコンパイル時に解決されるので、env.pl の読み込みごと BEGIN の中で行う。
+# 探索順は $ENV{PJJ_LIB}（テスト用）→ $main::PJJ_LIB（env.pl）→ 本番 → dev。
+# dev と本番は同じサーバー上にあり両方のパスが存在するので、env.pl で明示すること。
+our $PJJ_LIB;   # env.pl が設定する（未設定なら下のフォールバックを使う）
+BEGIN {
+    require Cwd;   # require は相対パスだと @INC を探すので絶対パスにする
+    my $env_file = Cwd::abs_path(dirname(__FILE__)) . '/env.pl';
+    require $env_file if -f $env_file;
+    my ($lib) = grep { defined && length && -d } (
+        $ENV{PJJ_LIB}, $PJJ_LIB, "/var/lib/perl5", "/home/sugawara/lib/perl5");
+    die "PJJ library not found\n" unless $lib;
+    unshift @INC, $lib;
+}
+use PJJ;
+use PJJ::Web;
+use PJJ::Crypt;
+use PJJ::DB;
+use PJJ::Session;
+use PJJ::Mail;
+use PJJ::RateLimit;
+use PJJ::AccessLog;
 
 # Zigsaw (ジグソーパズル) API  (CGI / Perl + PostgreSQL)
 #
@@ -80,13 +101,7 @@ use Socket qw(inet_pton AF_INET AF_INET6);
 #                                                      1ユーザー1パズル1件で upsert。200文字まで）
 
 my $COOKIE_NAME  = 'zigsaw_sid';
-# Cookie の Path は配信パスに合わせて自動判定する（環境ごとに固定値を持たない）。
-# SCRIPT_NAME から api.cgi を除いたディレクトリ部を使う。
-#   dev: /~sugawara/zigsaw/api.cgi -> /~sugawara/zigsaw/
-#   本番: /api.cgi                -> /
-my $COOKIE_PATH  = $ENV{SCRIPT_NAME} || '/';
-$COOKIE_PATH =~ s#/[^/]*$#/#;
-$COOKIE_PATH = '/' if $COOKIE_PATH eq '';
+# Cookie の Path（配信ディレクトリ）は PJJ が SCRIPT_NAME から自動判定する。
 my $SESSION_DAYS = 30;
 my $PBKDF2_ITER  = 120000;
 my $SIGNUP_TOKEN_HOURS = 1;
@@ -116,29 +131,52 @@ my $MAIL_MAX_PER_IP     = 10;
 # アクセスログの保持日数。これより古い行は log_access のついでに時々（確率的に）掃除する。
 my $ACCESS_LOG_KEEP_DAYS = 90;
 
-# 実行環境名。api.cgi と同じディレクトリの env.pl（git 管理外。dev/本番で内容が異なる）を
-# require し、その中で $main::ZIGSAW_ENV を設定する。未設置なら 'unknown'。
-our $ZIGSAW_ENV = 'unknown';
+# 実行環境ごとの設定は env.pl（git 管理外。dev/本番で内容が異なる）に置き、
+# ファイル冒頭の BEGIN で読み込み済み。ここでは未設定だったものに既定値を入れる
+# （BEGIN より後なので、代入で env.pl の値を潰さないよう「未設定なら」で入れる）。
+
+# 実行環境名。dev 専用エンドポイント（dev_*）の出し分けに使う。
+our $ZIGSAW_ENV;
+$ZIGSAW_ENV = "unknown" unless defined $ZIGSAW_ENV && length $ZIGSAW_ENV;
 # アプリのベース URL（末尾スラッシュ付き。例 https://zigsaw.peanutsjamjam.jp/）。
-# env.pl で $main::ZIGSAW_BASE_URL に設定する。メール内リンク等の絶対 URL 生成に使い、
-# これがあると Host ヘッダに依存しない（＝リセットリンク等の Host インジェクションを防ぐ）。
-our $ZIGSAW_BASE_URL = '';
+# メール内リンク等の絶対 URL 生成に使い、これがあると Host ヘッダに依存しない
+# （＝リセットリンク等の Host インジェクションを防ぐ）。
+our $ZIGSAW_BASE_URL;
+$ZIGSAW_BASE_URL = "" unless defined $ZIGSAW_BASE_URL;
 # 接続する PostgreSQL のデータベース名。テスト（t/）がサンドボックスの env.pl で
 # 専用 DB（zigsaw_test）に差し替える。dev / 本番では既定値のまま使う。
-our $ZIGSAW_DB = 'zigsaw';
+our $ZIGSAW_DB;
+$ZIGSAW_DB = "zigsaw" unless defined $ZIGSAW_DB && length $ZIGSAW_DB;
 # sendmail のパス。テストでは送信内容をファイルに記録する偽 sendmail に差し替える。
-our $ZIGSAW_SENDMAIL = '/usr/sbin/sendmail';
+our $ZIGSAW_SENDMAIL;
+$ZIGSAW_SENDMAIL = "/usr/sbin/sendmail" unless defined $ZIGSAW_SENDMAIL && length $ZIGSAW_SENDMAIL;
 # 緊急退避（公序良俗に反する投稿などを、管理者がアプリから消して隔離する）先。
 # 実ファイルと、消す前の DB の行（画像・パズル・進捗・タグ）をここに書き出す。
 # dev / 本番で同じ場所を使う。書き込めるよう ACL で apache と sugawara に rwx を与えてある。
-our $ZIGSAW_QUARANTINE_DIR = '/home/zigsaw/quarantine';
+our $ZIGSAW_QUARANTINE_DIR;
+$ZIGSAW_QUARANTINE_DIR = "/home/zigsaw/quarantine"
+    unless defined $ZIGSAW_QUARANTINE_DIR && length $ZIGSAW_QUARANTINE_DIR;
 # whois コマンドのパス（dev_access_log の Organization 表示に使う）。
 # テストでは決まった応答を返す偽 whois に差し替える。
-our $ZIGSAW_WHOIS = '/usr/bin/whois';
-{
-    my $env_file = dirname(__FILE__) . '/env.pl';
-    require $env_file if -f $env_file;
-}
+our $ZIGSAW_WHOIS;
+$ZIGSAW_WHOIS = "/usr/bin/whois" unless defined $ZIGSAW_WHOIS && length $ZIGSAW_WHOIS;
+
+# 共通ライブラリ PJJ の設定。このアプリと他アプリの違いは、すべてここで吸収する。
+PJJ->init(
+    app                  => "Zigsaw",              # メールの From / 件名 / 本文に出る表示名
+    db                   => $ZIGSAW_DB,
+    cookie_name          => $COOKIE_NAME,
+    session_days         => $SESSION_DAYS,
+    pbkdf2_iter          => $PBKDF2_ITER,
+    signup_token_hours   => $SIGNUP_TOKEN_HOURS,
+    reset_token_hours    => $RESET_TOKEN_HOURS,
+    mail_from            => $MAIL_FROM,
+    sendmail             => $ZIGSAW_SENDMAIL,
+    base_url             => $ZIGSAW_BASE_URL,
+    max_body_bytes       => $MAX_BODY_BYTES,
+    user_columns         => ["is_admin"],          # current_user が追加で引く users の列
+    access_log_keep_days => $ACCESS_LOG_KEEP_DAYS,
+);
 
 # アプリデータ（画像の実ファイル・whois キャッシュ）を置くディレクトリ
 # （api.cgi と同じ場所を基準にする）。
@@ -148,171 +186,6 @@ my $APPDATA_DIR = dirname(__FILE__) . '/appdata';
 my $WHOIS_CACHE_DIR = "$APPDATA_DIR/whois";
 
 my $JSON = JSON::PP->new->utf8->canonical;
-
-# ---- HTTP 出力 -------------------------------------------------------------
-my @EXTRA_HEADERS;
-sub add_header { push @EXTRA_HEADERS, $_[0]; }
-
-sub respond {
-    my ($data, $status) = @_;
-    $status ||= '200 OK';
-    my $body = $JSON->encode($data);
-    binmode STDOUT;
-    print "Status: $status\r\n";
-    print "Content-Type: application/json; charset=utf-8\r\n";
-    print "$_\r\n" for @EXTRA_HEADERS;
-    print "Content-Length: " . length($body) . "\r\n";
-    print "\r\n";
-    print $body;
-    exit 0;
-}
-
-sub fail {
-    # $code はエラーコード（フロントで表示）。$params は補間値（任意）。
-    my ($code, $status, $params) = @_;
-    $status ||= '400 Bad Request';
-    my $body = { error => $code };
-    $body->{params} = $params if defined $params;
-    respond($body, $status);
-}
-
-# ---- 入力 ------------------------------------------------------------------
-sub query_param {
-    my ($name) = @_;
-    my $qs = $ENV{QUERY_STRING} || '';
-    for my $pair (split /&/, $qs) {
-        my ($k, $v) = split /=/, $pair, 2;
-        next unless defined $k && $k eq $name;
-        $v = '' unless defined $v;
-        $v =~ tr/+/ /;
-        $v =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/ge;
-        # %xx を戻した時点ではバイト列なので、UTF-8 として文字列に直す
-        # （タグ名など非 ASCII を DB と突き合わせるのに必要。壊れていればそのまま返す）。
-        utf8::decode($v);
-        return $v;
-    }
-    return undef;
-}
-
-# 同じ名前のクエリパラメータを全部返す（tag=a&tag=b のような複数指定用）。
-sub query_params {
-    my ($name) = @_;
-    my $qs = $ENV{QUERY_STRING} || '';
-    my @out;
-    for my $pair (split /&/, $qs) {
-        my ($k, $v) = split /=/, $pair, 2;
-        next unless defined $k && $k eq $name;
-        $v = '' unless defined $v;
-        $v =~ tr/+/ /;
-        $v =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/ge;
-        utf8::decode($v);
-        push @out, $v;
-    }
-    return @out;
-}
-
-sub read_body_json {
-    my $length = $ENV{CONTENT_LENGTH} || 0;
-    return {} if $length <= 0;
-    # 読み込む前に上限で弾く。通常は Apache の LimitRequestBody が先に 413 を返すが、
-    # そちらの設定が失われてもメモリを食い潰さないよう、ここでも見る。
-    fail('payload_too_large', '413 Payload Too Large') if $length > $MAX_BODY_BYTES;
-    my $raw = '';
-    my $got = 0;
-    # 大きめのアップロードでも取りこぼさないよう、必要分を読み切る。
-    while ($got < $length) {
-        my $chunk = '';
-        my $n = read(STDIN, $chunk, $length - $got);
-        last if !defined $n || $n == 0;
-        $raw .= $chunk;
-        $got += $n;
-    }
-    return {} if $raw eq '';
-    my $data = eval { $JSON->decode($raw) };
-    return $data && ref($data) eq 'HASH' ? $data : {};
-}
-
-sub get_cookie {
-    my ($name) = @_;
-    my $raw = $ENV{HTTP_COOKIE} || '';
-    for my $pair (split /;\s*/, $raw) {
-        my ($k, $v) = split /=/, $pair, 2;
-        next unless defined $k && $k eq $name;
-        return defined $v ? $v : '';
-    }
-    return undef;
-}
-
-# ---- 乱数・パスワード ------------------------------------------------------
-sub random_hex {
-    my ($bytes) = @_;
-    open my $fh, '<:raw', '/dev/urandom' or die "urandom: $!";
-    read($fh, my $buf, $bytes);
-    close $fh;
-    return unpack('H*', $buf);
-}
-
-# PBKDF2-HMAC-SHA256, 1 ブロック (32byte) 分。hex を返す。
-sub pbkdf2 {
-    my ($password, $salt_hex, $iter) = @_;
-    my $salt = pack('H*', $salt_hex);
-    utf8::encode($password) if utf8::is_utf8($password);
-    my $u   = hmac_sha256($salt . pack('N', 1), $password);
-    my $out = $u;
-    for (my $i = 1; $i < $iter; $i++) {
-        $u = hmac_sha256($u, $password);
-        $out ^= $u;
-    }
-    return unpack('H*', $out);
-}
-
-# 一定時間比較（タイミング攻撃緩和）
-sub const_eq {
-    my ($a, $b) = @_;
-    return 0 if length($a) != length($b);
-    my $r = 0;
-    $r |= ord(substr($a, $_, 1)) ^ ord(substr($b, $_, 1)) for 0 .. length($a) - 1;
-    return $r == 0;
-}
-
-# PostgreSQL の bool（'t'/'f' や 1/0）を JSON::PP の true/false にする。
-sub pgbool {
-    my ($v) = @_;
-    return JSON::PP::false unless defined $v;
-    return ($v eq 't' || $v eq '1' || $v eq 'true' || (Scalar_true($v))) ? JSON::PP::true : JSON::PP::false;
-}
-sub Scalar_true { my $v = shift; return (!ref($v) && $v =~ /^\d+$/ && $v != 0) ? 1 : 0; }
-
-# ---- DB --------------------------------------------------------------------
-sub db {
-    my $dbh = DBI->connect(
-        "dbi:Pg:dbname=$ZIGSAW_DB", '', '',
-        { RaiseError => 1, AutoCommit => 1, PrintError => 0, pg_enable_utf8 => 1 }
-    ) or fail('db_error', '500 Internal Server Error');
-    return $dbh;
-}
-
-# アクセスログ: 送信元 IP（Apache が付ける REMOTE_ADDR）と、ログイン中ならその user_id を
-# 1行記録する。記録に失敗してもリクエスト自体は止めない（warn のみ）。未ログインは undef（NULL）。
-sub log_access {
-    my ($dbh, $user_id) = @_;
-    my $ip = $ENV{REMOTE_ADDR};
-    return unless defined $ip && $ip ne '';
-    eval { $dbh->do('INSERT INTO access_log (user_id, ip_addr) VALUES (?, ?)', undef, $user_id, $ip); 1 }
-        or warn "log_access failed: $@\n";
-    # 毎リクエストで DELETE を打つのは無駄なので、たまに（約2%）だけ古い行を掃除する。
-    purge_old_access_log($dbh) if rand() < 0.02;
-}
-
-# 保持日数より古いアクセスログを掃除する（ついで掃除。テーブル肥大化を防ぐ）。
-sub purge_old_access_log {
-    my ($dbh) = @_;
-    eval {
-        $dbh->do('DELETE FROM access_log WHERE accessed_at < now() - make_interval(days => ?)',
-            undef, $ACCESS_LOG_KEEP_DAYS);
-        1;
-    } or warn "purge_old_access_log failed: $@\n";
-}
 
 # ---- whois（dev_access_log の Organization 表示） ---------------------------
 # IP アドレスを whois で調べ、Organization の値を返す。結果はアドレス範囲
@@ -433,180 +306,7 @@ sub whois_org_for_ip {
     return $org;
 }
 
-# ---- レート制限 ------------------------------------------------------------
-# 直近 $minutes 分の (action, subject) 件数を数える。
-sub rate_count {
-    my ($dbh, $action, $subject, $minutes) = @_;
-    my ($n) = $dbh->selectrow_array(
-        'SELECT count(*) FROM rate_events
-          WHERE action = ? AND subject = ? AND created_at > now() - make_interval(mins => ?)',
-        undef, $action, $subject, $minutes
-    );
-    return $n || 0;
-}
-sub rate_add {
-    my ($dbh, $action, $subject) = @_;
-    eval { $dbh->do('INSERT INTO rate_events (action, subject) VALUES (?, ?)', undef, $action, $subject); 1 }
-        or warn "rate_add failed: $@\n";
-}
-sub rate_clear {
-    my ($dbh, $action, $subject) = @_;
-    eval { $dbh->do('DELETE FROM rate_events WHERE action = ? AND subject = ?', undef, $action, $subject); 1 }
-        or warn "rate_clear failed: $@\n";
-}
-# 古いレートイベントを掃除する（ついで掃除）。
-sub purge_old_rate_events {
-    my ($dbh) = @_;
-    eval { $dbh->do("DELETE FROM rate_events WHERE created_at < now() - interval '1 day'"); 1 }
-        or warn "purge_old_rate_events failed: $@\n";
-}
-
-# ---- セッション ------------------------------------------------------------
-sub set_session_cookie {
-    my ($token, $days) = @_;
-    $days ||= $SESSION_DAYS;
-    my $max = $days * 24 * 3600;
-    add_header("Set-Cookie: $COOKIE_NAME=$token; Path=$COOKIE_PATH; Max-Age=$max; HttpOnly; Secure; SameSite=Lax");
-}
-
-sub clear_session_cookie {
-    add_header("Set-Cookie: $COOKIE_NAME=; Path=$COOKIE_PATH; Max-Age=0; HttpOnly; Secure; SameSite=Lax");
-}
-
-# 期限切れセッションを掃除する（ついで掃除。テーブル肥大化を防ぐ）。
-sub purge_expired_sessions {
-    my ($dbh) = @_;
-    eval { $dbh->do('DELETE FROM sessions WHERE expires_at < now()'); 1 }
-        or warn "purge_expired_sessions failed: $@\n";
-}
-sub purge_expired_signup_tokens {
-    my ($dbh) = @_;
-    eval { $dbh->do('DELETE FROM signup_tokens WHERE expires_at < now()'); 1 }
-        or warn "purge_expired_signup_tokens failed: $@\n";
-}
-sub purge_expired_reset_tokens {
-    my ($dbh) = @_;
-    eval { $dbh->do('DELETE FROM reset_tokens WHERE expires_at < now()'); 1 }
-        or warn "purge_expired_reset_tokens failed: $@\n";
-}
-
-# ---- メール ----------------------------------------------------------------
-# アプリのベース URL（api.cgi のあるディレクトリ）を、リクエストの host/scheme から組み立てる。
-sub app_base_url {
-    # 設定済みの固定ベース URL があれば最優先で使う。Host ヘッダに依存しないので、
-    # メール内リンク（サインアップ/リセット）の Host インジェクションを防げる。
-    if (defined $ZIGSAW_BASE_URL && $ZIGSAW_BASE_URL ne '') {
-        my $b = $ZIGSAW_BASE_URL;
-        $b .= '/' unless $b =~ m#/$#;   # 末尾スラッシュを保証
-        return $b;
-    }
-    # 未設定時のフォールバック（後方互換）。この経路は HTTP_HOST に依存するので、
-    # 本番/dev とも env.pl に ZIGSAW_BASE_URL を設定しておくこと。
-    my $scheme = ($ENV{HTTPS} && lc $ENV{HTTPS} eq 'on') ? 'https'
-               : ($ENV{REQUEST_SCHEME} || 'https');
-    my $host = $ENV{HTTP_HOST} || 'localhost';
-    my $base = $ENV{SCRIPT_NAME} || '/';
-    $base =~ s#/[^/]*$#/#;
-    return "$scheme://$host$base";
-}
-
-sub mime_word {
-    my ($s) = @_;
-    utf8::encode($s) if utf8::is_utf8($s);
-    return '=?UTF-8?B?' . MIME::Base64::encode_base64($s, '') . '?=';
-}
-
-# 共通のメール送信。件名・本文（UTF-8 文字列）を受け取り、base64 で送る。
-sub send_mail {
-    my ($to, $subject, $body) = @_;
-    utf8::encode($body) if utf8::is_utf8($body);
-    my $ok = eval {
-        open(my $mh, '|-', $ZIGSAW_SENDMAIL, '-t', '-i') or die "sendmail: $!";
-        print $mh "From: Zigsaw <$MAIL_FROM>\r\n";
-        print $mh "To: $to\r\n";
-        print $mh "Subject: " . mime_word($subject) . "\r\n";
-        print $mh "MIME-Version: 1.0\r\n";
-        print $mh "Content-Type: text/plain; charset=\"UTF-8\"\r\n";
-        print $mh "Content-Transfer-Encoding: base64\r\n";
-        print $mh "\r\n";
-        print $mh MIME::Base64::encode_base64($body);
-        close($mh) or die "sendmail close: $!";
-        1;
-    };
-    warn "send_mail failed: $@\n" unless $ok;
-    return $ok ? 1 : 0;
-}
-
-sub send_signup_email {
-    my ($to, $url) = @_;
-    my $body = "Thank you for signing up for Zigsaw.\n"
-             . "Open the link below and set your username and password to complete your registration.\n"
-             . "(This link is valid for ${SIGNUP_TOKEN_HOURS} hour(s) only.)\n\n"
-             . "$url\n\n"
-             . "If you did not request this email, please ignore it.\n"
-             . "\n----------------------------------------\n\n"
-             . "Zigsaw への登録ありがとうございます。\n"
-             . "下記のリンクを開き、ユーザー名とパスワードを設定すると登録が完了します。\n"
-             . "（このリンクは ${SIGNUP_TOKEN_HOURS} 時間のみ有効です）\n\n"
-             . "$url\n\n"
-             . "このメールに心当たりがない場合は、破棄してください。\n";
-    return send_mail($to, 'Your Zigsaw sign-up link / 【Zigsaw】登録用リンクのお知らせ', $body);
-}
-
-sub send_reset_email {
-    my ($to, $url) = @_;
-    my $body = "We received a request to reset your Zigsaw password.\n"
-             . "Open the link below to set a new password.\n"
-             . "(This link is valid for ${RESET_TOKEN_HOURS} hour(s) only.)\n\n"
-             . "$url\n\n"
-             . "If you did not request this, please ignore this email; your password will not change.\n"
-             . "\n----------------------------------------\n\n"
-             . "Zigsaw のパスワード再設定のリクエストを受け付けました。\n"
-             . "下記のリンクを開いて、新しいパスワードを設定してください。\n"
-             . "（このリンクは ${RESET_TOKEN_HOURS} 時間のみ有効です）\n\n"
-             . "$url\n\n"
-             . "心当たりがない場合は、このメールを破棄してください（パスワードは変更されません）。\n";
-    return send_mail($to, 'Reset your Zigsaw password / 【Zigsaw】パスワード再設定のお知らせ', $body);
-}
-
-sub send_signup_exists_email {
-    my ($to, $url) = @_;
-    my $body = "Someone (perhaps you) tried to sign up for Zigsaw with this email address,\n"
-             . "but an account already exists for it.\n"
-             . "You can simply log in below. If you forgot your password, use \"Forgot your password?\".\n\n"
-             . "$url\n\n"
-             . "If this wasn't you, no action is needed; your account is unaffected.\n"
-             . "\n----------------------------------------\n\n"
-             . "このメールアドレスで Zigsaw への新規登録が試みられましたが、\n"
-             . "すでにアカウントが存在します。\n"
-             . "下記からそのままログインできます。パスワードをお忘れの場合は、ログイン画面の\n"
-             . "「パスワードをお忘れですか？」から再設定してください。\n\n"
-             . "$url\n\n"
-             . "心当たりがない場合は、対応は不要です（アカウントに影響はありません）。\n";
-    return send_mail($to, 'About your Zigsaw account / 【Zigsaw】アカウントについてのお知らせ', $body);
-}
-
 # ---- 認証ヘルパ ------------------------------------------------------------
-# 現在のログインユーザー {id, username, email, is_admin} を返す。未ログインなら undef。
-sub current_user {
-    my ($dbh) = @_;
-    my $token = get_cookie($COOKIE_NAME);
-    return undef unless defined $token && $token =~ /^[0-9a-f]{16,128}$/;
-    return $dbh->selectrow_hashref(
-        'SELECT u.id, u.username, u.email, u.is_admin FROM sessions s
-           JOIN users u ON u.id = s.user_id
-          WHERE s.token = ? AND s.expires_at > now()',
-        undef, $token
-    );
-}
-
-sub require_user {
-    my ($dbh) = @_;
-    my $u = current_user($dbh);
-    fail('not_authenticated', '401 Unauthorized') unless $u;
-    return $u;
-}
-
 # 管理者専用エンドポイント用。未ログイン・非管理者はどちらも 404 で返す
 # （401/403 で返し分けると、そのエンドポイントの存在自体を教えてしまう）。
 sub require_admin {
@@ -615,19 +315,6 @@ sub require_admin {
     fail('not_found', '404 Not Found')
         unless $u && pgbool($u->{is_admin}) == JSON::PP::true;
     return $u;
-}
-
-# 新しいセッションを作って Cookie を張る。
-sub start_session {
-    my ($dbh, $uid) = @_;
-    my $token = random_hex(32);
-    $dbh->do(
-        "INSERT INTO sessions (token, user_id, expires_at)
-         VALUES (?,?, now() + interval '$SESSION_DAYS days')",
-        undef, $token, $uid
-    );
-    purge_expired_sessions($dbh);
-    set_session_cookie($token);
 }
 
 # ---- 画像 ------------------------------------------------------------------

@@ -41,6 +41,9 @@ our @EXPORT = qw(
 #   env ZIGSAW_TEST_PERL=/usr/local/bin/perl prove t
 my $CGI_PERL = $ENV{ZIGSAW_TEST_PERL} || '/usr/bin/perl';
 my $TEST_DB  = 'zigsaw_test';
+# テスト対象の api.cgi が読む共通ライブラリ PJJ の置き場所。既定は dev の作業用
+# チェックアウト（直したライブラリをその場で試せるように）。PJJ_LIB 環境変数で差し替えられる。
+my $PJJ_LIB  = $ENV{PJJ_LIB} || '/home/sugawara/lib/perl5';
 
 my $ROOT;         # リポジトリのルート（api.cgi と ddl/ がある場所）
 my $SANDBOX;      # t/tmp/sandbox
@@ -83,11 +86,12 @@ sub init {
     # つながってしまうので、コピー時に差し替え口の存在を確かめる。
     my $src = do { open my $fh, '<:raw', "$ROOT/api.cgi" or die "read api.cgi: $!"; local $/; <$fh> };
     die "api.cgi lacks the ZIGSAW_DB override hook; refusing to run tests\n"
-        unless $src =~ /our \$ZIGSAW_DB/ && $src =~ /dbname=\$ZIGSAW_DB/;
+        unless $src =~ /our \$ZIGSAW_DB/ && $src =~ /db\s+=>\s+\$ZIGSAW_DB/;
     write_file("$SANDBOX/api.cgi", $src);
 
     # テスト用 env.pl（DB・sendmail・退避先・whois をサンドボックスに向ける）。
     write_file("$SANDBOX/env.pl", <<EOF);
+\$main::PJJ_LIB               = '$PJJ_LIB';
 \$main::ZIGSAW_ENV            = 'development';
 \$main::ZIGSAW_BASE_URL       = 'https://test.invalid/zigsaw/';
 \$main::ZIGSAW_DB             = '$TEST_DB';
