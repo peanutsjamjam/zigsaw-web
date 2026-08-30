@@ -36,6 +36,8 @@ ok $token, 'signup_request: トークンが DB に入る';
 my @mail = mails();
 is scalar(@mail), 1, 'signup_request: メールが1通送られる';
 like $mail[0], qr/To: \Q$EMAIL\E/, 'メール: 宛先';
+like $mail[0], qr/^From: Zigsaw <noreply\@test\.invalid>/m,
+    'メール: 差出人は env.pl の ZIGSAW_MAIL_FROM';
 # 本文は base64 なのでデコードして確認する。
 require MIME::Base64;
 my ($b64) = $mail[0] =~ /\r?\n\r?\n(.*)\z/s;

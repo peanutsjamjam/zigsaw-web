@@ -94,6 +94,7 @@ sub init {
 \$main::PJJ_LIB               = '$PJJ_LIB';
 \$main::ZIGSAW_ENV            = 'development';
 \$main::ZIGSAW_BASE_URL       = 'https://test.invalid/zigsaw/';
+\$main::ZIGSAW_MAIL_FROM      = 'noreply\@test.invalid';
 \$main::ZIGSAW_DB             = '$TEST_DB';
 \$main::ZIGSAW_SENDMAIL       = '$SANDBOX/sendmail';
 \$main::ZIGSAW_QUARANTINE_DIR = '$SANDBOX/quarantine';

@@ -105,7 +105,6 @@ my $SESSION_DAYS = 30;
 my $PBKDF2_ITER  = 120000;
 my $SIGNUP_TOKEN_HOURS = 1;
 my $RESET_TOKEN_HOURS  = 1;
-my $MAIL_FROM    = 'zigsaw@peanutsjamjam.jp';
 # アップロード画像の最大バイト数（full/thumb それぞれの、デコード後のサイズ）。
 my $MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 # リクエストボディの最大バイト数。画像は base64 で約 4/3 に膨らむので、その余裕をみる。
@@ -146,6 +145,12 @@ $ZIGSAW_BASE_URL = "" unless defined $ZIGSAW_BASE_URL;
 # 専用 DB（zigsaw_test）に差し替える。dev / 本番では既定値のまま使う。
 our $ZIGSAW_DB;
 $ZIGSAW_DB = "zigsaw" unless defined $ZIGSAW_DB && length $ZIGSAW_DB;
+
+# 確認メール（サインアップ・パスワード再設定）の差出人。
+# 自分のサーバーで動かすときは、必ず自分のドメインのアドレスに変えること。
+our $ZIGSAW_MAIL_FROM;
+$ZIGSAW_MAIL_FROM = 'zigsaw@example.com'
+    unless defined $ZIGSAW_MAIL_FROM && length $ZIGSAW_MAIL_FROM;
 # sendmail のパス。テストでは送信内容をファイルに記録する偽 sendmail に差し替える。
 our $ZIGSAW_SENDMAIL;
 $ZIGSAW_SENDMAIL = "/usr/sbin/sendmail" unless defined $ZIGSAW_SENDMAIL && length $ZIGSAW_SENDMAIL;
@@ -169,7 +174,7 @@ PJJ->init(
     pbkdf2_iter          => $PBKDF2_ITER,
     signup_token_hours   => $SIGNUP_TOKEN_HOURS,
     reset_token_hours    => $RESET_TOKEN_HOURS,
-    mail_from            => $MAIL_FROM,
+    mail_from            => $ZIGSAW_MAIL_FROM,
     sendmail             => $ZIGSAW_SENDMAIL,
     base_url             => $ZIGSAW_BASE_URL,
     max_body_bytes       => $MAX_BODY_BYTES,
