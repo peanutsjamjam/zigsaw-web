@@ -26,9 +26,8 @@ use PJJ::Web;
 use PJJ::Crypt;
 use PJJ::DB;
 use PJJ::Session;
-use PJJ::Mail;
-use PJJ::RateLimit;
 use PJJ::AccessLog;
+use PJJ::Auth;
 
 # Zigsaw (ジグソーパズル) API  (CGI / Perl + PostgreSQL)
 #
@@ -176,6 +175,20 @@ PJJ->init(
     max_body_bytes       => $MAX_BODY_BYTES,
     user_columns         => ["is_admin"],          # current_user が追加で引く users の列
     access_log_keep_days => $ACCESS_LOG_KEEP_DAYS,
+    # ログイン/メール送信のレート制限（PJJ::Auth が rate_events で数える）。
+    rate_limit           => {
+        login_window_min   => $LOGIN_WINDOW_MIN,
+        login_max_per_email=> $LOGIN_MAX_PER_EMAIL,
+        login_max_per_ip   => $LOGIN_MAX_PER_IP,
+        mail_window_min    => $MAIL_WINDOW_MIN,
+        mail_max_per_email => $MAIL_MAX_PER_EMAIL,
+        mail_max_per_ip    => $MAIL_MAX_PER_IP,
+    },
+    # アカウント応答の形（me / login / signup_complete / reset_complete で共通）。
+    account_json         => sub {
+        my ($u) = @_;
+        return { username => $u->{username}, email => $u->{email}, is_admin => pgbool($u->{is_admin}) };
+    },
 );
 
 # アプリデータ（画像の実ファイル・whois キャッシュ）を置くディレクトリ
@@ -554,227 +567,11 @@ eval {
     # アクセスログ: リクエストごとに、送信元 IP と（ログイン中なら）その user_id を1行残す。
     log_access($dbh, do { my $lu = current_user($dbh); $lu ? $lu->{id} : undef });
 
-    if ($action eq 'signup_request' && $method eq 'POST') {
-        my $body = read_body_json();
-        my $email = defined $body->{email} ? $body->{email} : '';
-        $email =~ s/^\s+|\s+$//g;
-        fail('email_required') if $email eq '';
-        fail('email_invalid')  if length($email) > 254 || $email !~ /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+    # 認証系（サインアップ／ログイン／パスワード／退会）は PJJ::Auth が処理する。
+    # 担当する action なら応答して終了し、担当外ならここへ戻ってアプリ固有の処理へ進む。
+    auth_dispatch($dbh, $action, $method);
 
-        # メール爆撃対策: 直近の送信が宛先/IP ごとに多すぎるときは送らない。存在秘匿・スロットル
-        # 秘匿のため応答は常に {ok}。しきい値内なら1通ぶんを記録してから送る。
-        my $ip = $ENV{REMOTE_ADDR} // '';
-        if (rate_count($dbh, 'mail_signup', 'email:' . lc($email), $MAIL_WINDOW_MIN) >= $MAIL_MAX_PER_EMAIL
-            || ($ip ne '' && rate_count($dbh, 'mail_signup', 'ip:' . $ip, $MAIL_WINDOW_MIN) >= $MAIL_MAX_PER_IP)) {
-            respond({ ok => JSON::PP::true });
-        }
-        rate_add($dbh, 'mail_signup', 'email:' . lc($email));
-        rate_add($dbh, 'mail_signup', 'ip:' . $ip) if $ip ne '';
-        purge_old_rate_events($dbh);
-
-        # 既に登録済みでも、存在の有無を秘匿するため未登録時と同じ {ok} を返す。
-        if ($dbh->selectrow_array('SELECT 1 FROM users WHERE lower(email) = lower(?)', undef, $email)) {
-            send_signup_exists_email($email, app_base_url());
-            respond({ ok => JSON::PP::true });
-        }
-        $dbh->do('DELETE FROM signup_tokens WHERE lower(email) = lower(?)', undef, $email);
-        my $token = random_hex(32);
-        $dbh->do(
-            "INSERT INTO signup_tokens (token, email, expires_at)
-             VALUES (?,?, now() + interval '$SIGNUP_TOKEN_HOURS hours')",
-            undef, $token, $email
-        );
-        purge_expired_signup_tokens($dbh);
-        send_signup_email($email, app_base_url() . "?signup=$token")
-            or fail('mail_failed', '500 Internal Server Error');
-        respond({ ok => JSON::PP::true });
-    }
-    elsif ($action eq 'signup_verify' && $method eq 'GET') {
-        my $token = query_param('token') || '';
-        my $row = $dbh->selectrow_hashref(
-            'SELECT email FROM signup_tokens WHERE token = ? AND expires_at > now()',
-            undef, $token
-        );
-        fail('signup_token_invalid', '400 Bad Request') unless $row;
-        respond({ email => $row->{email} });
-    }
-    elsif ($action eq 'signup_complete' && $method eq 'POST') {
-        my $body = read_body_json();
-        my $token    = defined $body->{token}    ? $body->{token}    : '';
-        my $username = defined $body->{username} ? $body->{username} : '';
-        my $password = defined $body->{password} ? $body->{password} : '';
-        $username =~ s/^\s+|\s+$//g;
-
-        my $email = $dbh->selectrow_array(
-            'SELECT email FROM signup_tokens WHERE token = ? AND expires_at > now()',
-            undef, $token
-        );
-        fail('signup_token_invalid', '400 Bad Request') unless defined $email;
-
-        fail('username_length') if $username eq '' || length($username) > 50;
-        fail('password_too_short') if length($password) < 4;
-        fail('password_too_long') if length($password) > 128;
-
-        my @taken;
-        push @taken, 'email'
-            if $dbh->selectrow_array('SELECT 1 FROM users WHERE lower(email) = lower(?)', undef, $email);
-        push @taken, 'username'
-            if $dbh->selectrow_array('SELECT 1 FROM users WHERE username = ?', undef, $username);
-        respond({ error => 'duplicate', fields => \@taken }, '409 Conflict') if @taken;
-
-        my $salt = random_hex(16);
-        my $hash = pbkdf2($password, $salt, $PBKDF2_ITER);
-        my $uid = $dbh->selectrow_array(
-            'INSERT INTO users (username, email, password_hash, salt, iterations)
-             VALUES (?,?,?,?,?) RETURNING id',
-            undef, $username, $email, $hash, $salt, $PBKDF2_ITER
-        );
-        $dbh->do('DELETE FROM signup_tokens WHERE lower(email) = lower(?)', undef, $email);
-        start_session($dbh, $uid);
-        respond({ username => $username, email => $email, is_admin => JSON::PP::false });
-    }
-    elsif ($action eq 'login' && $method eq 'POST') {
-        my $body = read_body_json();
-        my $email    = defined $body->{email}    ? $body->{email}    : '';
-        my $password = defined $body->{password} ? $body->{password} : '';
-        $email =~ s/^\s+|\s+$//g;
-        my $ip = $ENV{REMOTE_ADDR} // '';
-        my $ekey = 'email:' . lc($email);
-        my $ikey = 'ip:' . $ip;
-
-        # 直近の失敗が多すぎる（同一メール or 同一IP）なら一時的に拒否する（総当たり抑止）。
-        if (rate_count($dbh, 'login_fail', $ekey, $LOGIN_WINDOW_MIN) >= $LOGIN_MAX_PER_EMAIL
-            || ($ip ne '' && rate_count($dbh, 'login_fail', $ikey, $LOGIN_WINDOW_MIN) >= $LOGIN_MAX_PER_IP)) {
-            fail('too_many_attempts', '429 Too Many Requests');
-        }
-
-        my $u = $dbh->selectrow_hashref(
-            'SELECT id, username, email, password_hash, salt, iterations, is_admin
-               FROM users WHERE lower(email) = lower(?)',
-            undef, $email
-        );
-        # ユーザーが存在しなくてもダミーで PBKDF2 を回し、応答時間でのアカウント列挙を防ぐ。
-        my $ok = 0;
-        if ($u) {
-            my $hash = pbkdf2($password, $u->{salt}, $u->{iterations});
-            $ok = const_eq($hash, $u->{password_hash});
-        } else {
-            pbkdf2($password, '0' x 32, $PBKDF2_ITER);
-        }
-        unless ($ok) {
-            rate_add($dbh, 'login_fail', $ekey);
-            rate_add($dbh, 'login_fail', $ikey) if $ip ne '';
-            purge_old_rate_events($dbh);
-            fail('invalid_credentials', '401 Unauthorized');
-        }
-        # 成功したらそのメールの失敗記録をクリア（正規利用者が締め出されないように）。
-        rate_clear($dbh, 'login_fail', $ekey);
-        start_session($dbh, $u->{id});
-        respond({ username => $u->{username}, email => $u->{email}, is_admin => pgbool($u->{is_admin}) });
-    }
-    elsif ($action eq 'logout' && $method eq 'POST') {
-        my $token = get_cookie($COOKIE_NAME);
-        $dbh->do('DELETE FROM sessions WHERE token = ?', undef, $token)
-            if defined $token && $token =~ /^[0-9a-f]+$/;
-        clear_session_cookie();
-        respond({ ok => JSON::PP::true });
-    }
-    elsif ($action eq 'change_password' && $method eq 'POST') {
-        my $u = require_user($dbh);
-        my $body = read_body_json();
-        my $current = defined $body->{current_password} ? $body->{current_password} : '';
-        my $new     = defined $body->{new_password}     ? $body->{new_password}     : '';
-        my $row = $dbh->selectrow_hashref(
-            'SELECT password_hash, salt, iterations FROM users WHERE id = ?', undef, $u->{id}
-        );
-        fail('not_found', '404 Not Found') unless $row;
-        my $cur_hash = pbkdf2($current, $row->{salt}, $row->{iterations});
-        fail('current_password_wrong', '403 Forbidden')
-            unless const_eq($cur_hash, $row->{password_hash});
-        fail('password_too_short') if length($new) < 4;
-        fail('password_too_long')  if length($new) > 128;
-        my $salt = random_hex(16);
-        my $hash = pbkdf2($new, $salt, $PBKDF2_ITER);
-        $dbh->do('UPDATE users SET password_hash = ?, salt = ?, iterations = ? WHERE id = ?',
-            undef, $hash, $salt, $PBKDF2_ITER, $u->{id});
-        respond({ ok => JSON::PP::true });
-    }
-    elsif ($action eq 'reset_request' && $method eq 'POST') {
-        my $body = read_body_json();
-        my $email = defined $body->{email} ? $body->{email} : '';
-        $email =~ s/^\s+|\s+$//g;
-        fail('email_required') if $email eq '';
-
-        # メール爆撃対策: 直近の送信が宛先/IP ごとに多すぎるときは送らない（応答は常に {ok}）。
-        my $ip = $ENV{REMOTE_ADDR} // '';
-        if (rate_count($dbh, 'mail_reset', 'email:' . lc($email), $MAIL_WINDOW_MIN) >= $MAIL_MAX_PER_EMAIL
-            || ($ip ne '' && rate_count($dbh, 'mail_reset', 'ip:' . $ip, $MAIL_WINDOW_MIN) >= $MAIL_MAX_PER_IP)) {
-            respond({ ok => JSON::PP::true });
-        }
-
-        my $uid = $dbh->selectrow_array('SELECT id FROM users WHERE lower(email) = lower(?)', undef, $email);
-        if ($uid) {
-            # 実際に送るときだけ1通ぶんを記録する（爆撃されるのは実在アドレス宛のため）。
-            rate_add($dbh, 'mail_reset', 'email:' . lc($email));
-            rate_add($dbh, 'mail_reset', 'ip:' . $ip) if $ip ne '';
-            $dbh->do('DELETE FROM reset_tokens WHERE user_id = ?', undef, $uid);
-            my $token = random_hex(32);
-            $dbh->do(
-                "INSERT INTO reset_tokens (token, user_id, expires_at)
-                 VALUES (?,?, now() + interval '$RESET_TOKEN_HOURS hours')",
-                undef, $token, $uid
-            );
-            purge_expired_reset_tokens($dbh);
-            purge_old_rate_events($dbh);
-            send_reset_email($email, app_base_url() . "?reset=$token");
-        }
-        # 存在の有無は秘匿。登録の有無に関わらず {ok} を返す。
-        respond({ ok => JSON::PP::true });
-    }
-    elsif ($action eq 'reset_verify' && $method eq 'GET') {
-        my $token = query_param('token') || '';
-        my $row = $dbh->selectrow_hashref(
-            'SELECT u.email FROM reset_tokens r JOIN users u ON u.id = r.user_id
-              WHERE r.token = ? AND r.expires_at > now()',
-            undef, $token
-        );
-        fail('reset_token_invalid', '400 Bad Request') unless $row;
-        respond({ email => $row->{email} });
-    }
-    elsif ($action eq 'reset_complete' && $method eq 'POST') {
-        my $body = read_body_json();
-        my $token    = defined $body->{token}    ? $body->{token}    : '';
-        my $password = defined $body->{password} ? $body->{password} : '';
-        my $row = $dbh->selectrow_hashref(
-            'SELECT u.id, u.username, u.email, u.is_admin FROM reset_tokens r JOIN users u ON u.id = r.user_id
-              WHERE r.token = ? AND r.expires_at > now()',
-            undef, $token
-        );
-        fail('reset_token_invalid', '400 Bad Request') unless $row;
-        fail('password_too_short') if length($password) < 4;
-        fail('password_too_long')  if length($password) > 128;
-        my $salt = random_hex(16);
-        my $hash = pbkdf2($password, $salt, $PBKDF2_ITER);
-        $dbh->do('UPDATE users SET password_hash = ?, salt = ?, iterations = ? WHERE id = ?',
-            undef, $hash, $salt, $PBKDF2_ITER, $row->{id});
-        $dbh->do('DELETE FROM reset_tokens WHERE user_id = ?', undef, $row->{id});
-        $dbh->do('DELETE FROM sessions WHERE user_id = ?', undef, $row->{id});
-        start_session($dbh, $row->{id});
-        respond({ username => $row->{username}, email => $row->{email}, is_admin => pgbool($row->{is_admin}) });
-    }
-    elsif ($action eq 'account' && $method eq 'DELETE') {
-        my $u = require_user($dbh);
-        # users を消すと progress / sessions / reset_tokens は CASCADE で消える。
-        # アップロード画像は owner_id が NULL になり、ギャラリーには残る（他の人が遊べる）。
-        $dbh->do('DELETE FROM users WHERE id = ?', undef, $u->{id});
-        clear_session_cookie();
-        respond({ ok => JSON::PP::true });
-    }
-    elsif ($action eq 'me' && $method eq 'GET') {
-        my $u = require_user($dbh);
-        respond({ username => $u->{username}, email => $u->{email}, is_admin => pgbool($u->{is_admin}) });
-    }
-    elsif ($action eq 'dev_storage' && $method eq 'GET') {
+    if ($action eq 'dev_storage' && $method eq 'GET') {
         # 開発用: 画像ディレクトリのファイル数・合計サイズと、それが載っている
         # ファイルシステムの総容量・空き容量。開発環境の管理者でのみ有効。
         fail('not_found', '404 Not Found') unless $ZIGSAW_ENV eq 'development';
