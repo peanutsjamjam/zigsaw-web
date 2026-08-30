@@ -24,7 +24,7 @@
 
 技術的な構成・API・開発フローは [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) を参照してください。
 
-サインアップ・ログイン・セッション・パスワード再設定・レート制限は、このリポジトリには実装が無く、
-共通ライブラリ [pjj-perl5](https://github.com/peanutsjamjam/pjj-perl5)（`PJJ::*`）を使っています。
+サインアップ・ログイン・セッション・パスワード再設定・レート制限の実装は、共通ライブラリ
+[pjj-perl5](https://github.com/peanutsjamjam/pjj-perl5)（`PJJ::*`）を使用しています。
 `api.cgi` は `PJJ->init(...)` で設定を渡して `auth_dispatch()` を呼ぶだけです。
 動かすにはライブラリの clone と、`env.pl` への場所の記載が必要です。
