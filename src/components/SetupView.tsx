@@ -44,6 +44,8 @@ type Props = {
       このパズルのコメントタブを開いた状態で始める。通常は null。 */
   initialCommentsPuzzle: Puzzle | null
   onStart: (req: StartRequest) => void
+  /** 開始に失敗した理由。押しても何も起きない状態にしないため、プレイボタンの下に出す。 */
+  startError: string | null
   /** フラスコボタン: 画面全体を開発用ビューへ切り替える。 */
   onOpenDev: () => void
   /** 2つ目のフラスコボタン: 画面全体をアクセスログのダイジェストへ切り替える。 */
@@ -98,7 +100,7 @@ function filtersLabel(filters: Filter[]): string {
   return filters.map(filterLabel).join('・')
 }
 
-export function SetupView({ account, isDev, initialCommentsPuzzle, onStart, onOpenDev, onOpenDevLog, onRequestLogin, onLoggedOut, busy }: Props) {
+export function SetupView({ account, isDev, initialCommentsPuzzle, onStart, startError, onOpenDev, onOpenDevLog, onRequestLogin, onLoggedOut, busy }: Props) {
   // images / puzzles は「いま表示しているページのぶんだけ」。総件数は total で持つ。
   const [images, setImages] = useState<GalleryImage[]>([])
   const [imagesTotal, setImagesTotal] = useState(0)
@@ -1055,6 +1057,7 @@ export function SetupView({ account, isDev, initialCommentsPuzzle, onStart, onOp
                         : 'このパズルをプレイする'}
                     </button>
                   </div>
+                  {startError && <div className="error">{startError}</div>}
                   {selectedProgress && (
                     <div className="row edit-buttons">
                       <button type="button" className="btn danger" onClick={() => setConfirmingProgressRemoval(selectedProgress)} disabled={busy}>
@@ -1202,6 +1205,7 @@ export function SetupView({ account, isDev, initialCommentsPuzzle, onStart, onOp
                         : 'このパズルをプレイする'}
                     </button>
                   </div>
+                  {startError && <div className="error">{startError}</div>}
                   {canDelete && (
                     <div className="row edit-buttons">
                       {/* 非活性の理由は下の文ではなく、ボタン上のツールチップで示す。無効ボタンは

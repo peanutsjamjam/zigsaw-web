@@ -34,6 +34,8 @@ export default function App() {
   const [showDevLogView, setShowDevLogView] = useState(false)
   const [session, setSession] = useState<Session | null>(null)
   const [busy, setBusy] = useState(false)
+  // 開始に失敗した理由。押しても何も起きない状態にしないため画面に出す。
+  const [startError, setStartError] = useState<string | null>(null)
   // 完成ダイアログの「クリアコメントを書く」で選択画面へ戻るとき、そのパズルの
   // コメントタブを開いた状態で始めるための受け渡し。次のゲーム開始時にクリアする。
   const [commentsPuzzle, setCommentsPuzzle] = useState<Puzzle | null>(null)
@@ -87,7 +89,20 @@ export default function App() {
 
   // パズル（画像＋グリッド）を、必要なら復元状態つきで開始する。
   const startPuzzle = useCallback(async (puzzle: Puzzle, resumeState: StartRequest['resumeState']) => {
-    const res = await fetch(puzzle.full_url)
+    let res: Response
+    try {
+      res = await fetch(puzzle.full_url)
+    } catch (e) {
+      // 画像がこのページと別オリジンだと、同一生成元ポリシーで拒否されて
+      // ここへ来る（ブラウザ側の CORS エラー。サーバーは 200 を返している）。
+      // 2026-09-10 に www 付きで開いて実際にこれを踏んだので、理由を添える。
+      const imageOrigin = new URL(puzzle.full_url, window.location.href).origin
+      if (imageOrigin !== window.location.origin) {
+        throw new Error(`画像の置き場所 (${imageOrigin}) がこのページ (${window.location.origin}) と別オリジンのため読み込めません。`, { cause: e })
+      }
+      throw e
+    }
+    if (!res.ok) throw new Error(`画像を取得できませんでした (${res.status})`)
     const blob = await res.blob()
     const { pieces, boardSize } = await buildPuzzle(blob, puzzle.columns, puzzle.rows)
     setSession({
@@ -103,8 +118,16 @@ export default function App() {
 
   const start = useCallback(async (req: StartRequest) => {
     setBusy(true)
+    setStartError(null)
     setCommentsPuzzle(null)
     try { await startPuzzle(req.puzzle, req.resumeState) }
+    catch (e) {
+      // catch が無いと、失敗しても画面が変わらないだけで何も出ない
+      // （呼び出し側が void で捨てるうえ ErrorBoundary も無いため）。
+      // 2026-09-10 の CORS の件はこれで原因が画面に出ず、調査に時間がかかった。
+      console.error('パズルを開始できませんでした', e)
+      setStartError(`パズルを開始できませんでした。${e instanceof Error ? e.message : String(e)}`)
+    }
     finally { setBusy(false) }
   }, [startPuzzle])
 
@@ -168,6 +191,7 @@ export default function App() {
         isDev={isDev}
         initialCommentsPuzzle={commentsPuzzle}
         onStart={(req) => void start(req)}
+        startError={startError}
         onOpenDev={() => setShowDevView(true)}
         onOpenDevLog={() => setShowDevLogView(true)}
         onRequestLogin={() => setShowAuth(true)}
